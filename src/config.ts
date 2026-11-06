@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,9 @@ export interface Config {
   orcaBin: string;
   orcaResources: string;
   allowedHosts: string[] | null;
+  uiPassword: string | null;
+  sessionSecret: string | null;
+  cookieSecure: boolean;
   version: string;
 }
 
@@ -31,6 +35,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   }
 
   const allowed = (env.SCYTH3D_ALLOWED_HOSTS ?? "").trim();
+  const uiPassword = env.SCYTH3D_UI_PASSWORD?.trim() || null;
+  if (uiPassword && uiPassword.length < MIN_API_KEY_LENGTH) {
+    throw new Error(`SCYTH3D_UI_PASSWORD must be at least ${MIN_API_KEY_LENGTH} characters.`);
+  }
+  const sessionSecret = resolveSessionSecret(env.SCYTH3D_SESSION_SECRET, uiPassword);
   return {
     apiKey,
     host: env.HOST?.trim() || "0.0.0.0",
@@ -45,8 +54,23 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     orcaBin: env.ORCA_SLICER_BIN?.trim() || "orca-slicer",
     orcaResources: env.ORCA_RESOURCES?.trim() || "/opt/orcaslicer/resources",
     allowedHosts: allowed ? allowed.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean) : null,
+    uiPassword,
+    sessionSecret,
+    cookieSecure: env.SCYTH3D_COOKIE_SECURE === "1" || env.SCYTH3D_COOKIE_SECURE === "true",
     version: readPackageVersion(),
   };
+}
+
+function resolveSessionSecret(explicit: string | undefined, uiPassword: string | null): string | null {
+  const trimmed = explicit?.trim() || "";
+  if (trimmed) {
+    if (trimmed.length < 16) {
+      throw new Error("SCYTH3D_SESSION_SECRET must be at least 16 characters.");
+    }
+    return trimmed;
+  }
+  if (!uiPassword) return null;
+  return createHash("sha256").update(`scyth3d-session-v1\0${uiPassword}`).digest("base64url");
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {

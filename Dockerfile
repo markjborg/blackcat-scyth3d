@@ -6,8 +6,9 @@ FROM node:22-bookworm AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig.json ./
+COPY tsconfig.json vite.config.ts ./
 COPY src ./src
+COPY web ./web
 RUN npm run build && npm prune --omit=dev
 
 FROM ubuntu:24.04
@@ -49,6 +50,7 @@ WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/public ./public
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin scyth3d \
     && chown -R scyth3d:scyth3d /app /data /tmp/scyth3d-home

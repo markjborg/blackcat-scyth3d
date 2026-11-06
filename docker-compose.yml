@@ -7,6 +7,7 @@ services:
       - .env
     environment:
       SCYTH3D_API_KEY: ${SCYTH3D_API_KEY:?Set SCYTH3D_API_KEY in .env}
+      SCYTH3D_UI_PASSWORD: ${SCYTH3D_UI_PASSWORD:?Set SCYTH3D_UI_PASSWORD in .env}
       SCYTH3D_DATA_DIR: /data
       PORT: "8080"
     volumes:

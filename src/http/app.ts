@@ -1,18 +1,30 @@
 import { spawnSync } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
-import { requireApiKey } from "../auth.js";
+import { requireApiKey, requireApiKeyOrSession } from "../auth.js";
 import type { Config } from "../config.js";
 import { ApiError, errorBody } from "../errors.js";
 import { registerTools } from "../mcp.js";
 import { publicCatalog } from "../profiles/catalog.js";
 import { presentJob } from "../present.js";
 import { ScythService } from "../service.js";
+import {
+  clearLoginFailures,
+  clearSession,
+  clientIp,
+  hasValidSession,
+  issueSession,
+  loginBlocked,
+  noteLoginFailure,
+  passwordsMatch,
+} from "../session.js";
 import { assertId, type JobRecord, type ModelRecord } from "../store.js";
+import { renderLoginPage, renderUiMissingPage } from "./loginPage.js";
 import { readSingleUpload } from "./upload.js";
 
 export interface AppBundle {
@@ -35,7 +47,9 @@ export function createApp(config: Config, service: ScythService): AppBundle {
 
   const jsonLimit = Math.max(1024 * 1024, Math.ceil(config.mcpInlineMaxBytes * 1.4) + 256 * 1024);
   app.use(express.json({ limit: jsonLimit }));
-  app.use(requireApiKey(config));
+  app.use(express.urlencoded({ extended: false, limit: "32kb" }));
+  mountLogin(app, config);
+  app.use(requireApiKeyOrSession(config));
 
   app.get("/v1/printers", (_req, res) => {
     res.json({ printers: publicCatalog().printers });
@@ -126,9 +140,21 @@ export function createApp(config: Config, service: ScythService): AppBundle {
     return server;
   }, { responseMode: "auto" });
   const mcpNode = toNodeHandler(mcp, { maxRequestBodySize: jsonLimit });
-  app.all("/mcp", (req, res) => {
+  app.all("/mcp", requireApiKey(config), (req, res) => {
     void mcpNode(req, res, req.body);
   });
+
+  const uiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../public");
+  app.get("/", (_req, res) => {
+    const index = path.join(uiRoot, "index.html");
+    if (!existsSync(index)) {
+      res.status(503).type("html").send(renderUiMissingPage());
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(index);
+  });
+  app.use(express.static(uiRoot, { index: false, fallthrough: true }));
 
   app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
@@ -149,6 +175,58 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   });
 
   return { app, service };
+}
+
+function mountLogin(app: express.Express, config: Config): void {
+  app.get("/login", (req, res) => {
+    if (hasValidSession(req, config)) {
+      res.redirect("/");
+      return;
+    }
+    res.type("html").send(renderLoginPage({ failed: false, limited: false, unconfigured: !config.uiPassword }));
+  });
+
+  app.post("/login", (req, res) => {
+    const json = Boolean(req.is("application/json"));
+    const send = (status: number, code: string, message: string, page: { failed: boolean; limited: boolean; unconfigured: boolean }) => {
+      if (json) {
+        res.status(status).json({ error: { code, message } });
+        return;
+      }
+      res.status(status).type("html").send(renderLoginPage(page));
+    };
+    if (!config.uiPassword || !config.sessionSecret) {
+      send(503, "ui_unconfigured", "Set SCYTH3D_UI_PASSWORD on the server.", { failed: false, limited: false, unconfigured: true });
+      return;
+    }
+    const ip = clientIp(req);
+    if (loginBlocked(ip)) {
+      send(429, "rate_limited", "Too many attempts. Wait a few minutes and try again.", { failed: false, limited: true, unconfigured: false });
+      return;
+    }
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!password || !passwordsMatch(password, config.uiPassword)) {
+      noteLoginFailure(ip);
+      send(401, "unauthorized", "That password is not right.", { failed: true, limited: false, unconfigured: false });
+      return;
+    }
+    clearLoginFailures(ip);
+    issueSession(res, config);
+    if (json) {
+      res.json({ ok: true });
+      return;
+    }
+    res.redirect(303, "/");
+  });
+
+  app.post("/logout", (req, res) => {
+    clearSession(res, config);
+    if (req.is("application/json")) {
+      res.json({ ok: true });
+      return;
+    }
+    res.redirect(303, "/login");
+  });
 }
 
 async function readyFdmJob(service: ScythService, id: string): Promise<JobRecord> {

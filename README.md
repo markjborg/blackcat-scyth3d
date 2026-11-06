@@ -1,6 +1,6 @@
 # BlackCat Scyth3d
 
-Self-hosted slicing and quoting for BlackCat MakerLab in Malta. Version 1 is an HTTP API plus a Model Context Protocol server. A browser slicer comes later; the API is shaped so that UI can upload a model, pick a printer and material, poll a job, and download the G-code or 3MF.
+Self-hosted slicing and quoting for BlackCat MakerLab in Malta. One process serves the browser slicer, the REST API, and the Model Context Protocol server. They share the OrcaSlicer engine, the job store, and the pricing rules.
 
 FDM jobs are sliced with [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) 2.4.2, headless, using the Bambu Lab 0.4 mm presets that ship with it. Resin jobs are not sliced. The service measures the mesh and returns volume and grams.
 
@@ -33,20 +33,22 @@ Resin grams use a closed-mesh volume and these densities: Standard Resin 1.10 g/
 
 ```bash
 cp .env.example .env
-# put a long random value in SCYTH3D_API_KEY, for example:
-# openssl rand -hex 32
+# put long random values in SCYTH3D_API_KEY and SCYTH3D_UI_PASSWORD
 docker compose up --build
 ```
 
-The API listens on port 8080. Models and jobs are stored in the `scyth3d-data` volume and removed after `SCYTH3D_JOB_TTL_HOURS` (default 48).
+Open `http://127.0.0.1:8080`, sign in with the UI password, and drop a model on the plate. The API listens on the same port. Models and jobs are stored in the `scyth3d-data` volume and removed after `SCYTH3D_JOB_TTL_HOURS` (default 48).
 
-Do not commit `.env`. The key is read only from the environment.
+Do not commit `.env`. The API key and the UI password are read only from the environment. The browser bundle does not contain the API key.
 
 ## Environment
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SCYTH3D_API_KEY` | required | Bearer token for the REST API and MCP. At least 8 characters. |
+| `SCYTH3D_UI_PASSWORD` | unset | Password for the browser. At least 8 characters. Sessions are an HttpOnly cookie. |
+| `SCYTH3D_SESSION_SECRET` | derived | Optional signing key for the session cookie. At least 16 characters. |
+| `SCYTH3D_COOKIE_SECURE` | off | Set to `1` when the site is served over HTTPS. |
 | `PORT` | `8080` | HTTP port inside the container. |
 | `HOST` | `0.0.0.0` | Bind address. |
 | `SCYTH3D_DATA_DIR` | `data` | Models, jobs, G-code, and 3MF. |
@@ -59,7 +61,13 @@ Do not commit `.env`. The key is read only from the environment.
 | `ORCA_SLICER_BIN` | `/opt/orcaslicer/bin/orca-slicer` | OrcaSlicer binary. |
 | `ORCA_RESOURCES` | `/opt/orcaslicer/resources` | Directory that contains `profiles/`. |
 
-`GET /health` does not require a key, so a process supervisor can probe it. Every other route requires `Authorization: Bearer <key>` or `X-API-Key`.
+`GET /health` does not require a key, so a process supervisor can probe it. `/login` takes the UI password and sets an HttpOnly session cookie. The REST API accepts that cookie or `Authorization: Bearer <key>` / `X-API-Key`. MCP accepts only the API key. A job created in the browser is the same record `get_job` returns.
+
+## Browser
+
+The page at `/` is a dark slicer: drag-and-drop STL, 3MF, or OBJ, a three.js plate for the selected printer, orbit and zoom, 90° rotates, scale, and lay-flat. Layer height maps to the 0.16 / 0.20 / 0.24 mm profiles. Infill and supports are sent with the slice. Resin runs the volume estimator. The receipt shows raw price, the €2.50 line minimum, the €10 order minimum, VAT, and the total. G-code and 3MF download from the job. After an FDM slice, a layer slider draws the extrusion moves on the plate.
+
+Rotate, scale, and lay-flat are baked into the STL that gets uploaded, so the slice matches the view. The plate origin is the front-left corner, in millimetres, same as the Bambu presets.
 
 ## HTTP API
 

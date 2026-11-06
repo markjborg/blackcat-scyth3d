@@ -1,23 +1,48 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import type { Config } from "./config.js";
+import { hasValidSession } from "./session.js";
 
 export function requireApiKey(config: Config) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (req.path === "/health") {
+    if (bearerOk(req, config)) {
       next();
       return;
     }
-    const provided = tokenFrom(req);
-    if (!provided || !tokensMatch(provided, config.apiKey)) {
-      res.setHeader("WWW-Authenticate", 'Bearer realm="scyth3d"');
-      res.status(401).json({
-        error: { code: "unauthorized", message: "A valid API key is required." },
-      });
+    unauthorized(res);
+  };
+}
+
+/** Browser sessions may call the REST API. MCP stays on the API key. */
+export function requireApiKeyOrSession(config: Config) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (bearerOk(req, config) || hasValidSession(req, config)) {
+      next();
       return;
     }
-    next();
+    if (req.method === "GET" && acceptsHtml(req)) {
+      res.redirect("/login");
+      return;
+    }
+    unauthorized(res);
   };
+}
+
+function bearerOk(req: Request, config: Config): boolean {
+  const provided = tokenFrom(req);
+  return Boolean(provided && tokensMatch(provided, config.apiKey));
+}
+
+function unauthorized(res: Response): void {
+  res.setHeader("WWW-Authenticate", 'Bearer realm="scyth3d"');
+  res.status(401).json({
+    error: { code: "unauthorized", message: "A valid API key is required." },
+  });
+}
+
+function acceptsHtml(req: Request): boolean {
+  const accept = req.headers.accept;
+  return typeof accept === "string" && accept.includes("text/html");
 }
 
 export function tokenFrom(req: { headers: Request["headers"] }): string | null {

@@ -31,6 +31,7 @@ jobs:
           cd /opt && sudo /tmp/OrcaSlicer.AppImage --appimage-extract
           sudo mv /opt/squashfs-root /opt/orcaslicer
       - run: npm ci
+      - run: npm run build
       - run: npm test
         env:
           SCYTH3D_API_KEY: test-key-123456
