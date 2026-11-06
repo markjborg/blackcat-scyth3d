@@ -1,0 +1,13 @@
+BlackCat Scyth3d
+Copyright (C) 2026 BlackCat MakerLab
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, version 3.
+
+This service invokes OrcaSlicer (https://github.com/OrcaSlicer/OrcaSlicer),
+which is licensed under the GNU Affero General Public License version 3.
+The Docker image downloads a pinned OrcaSlicer AppImage at build time and
+does not vendor its source. If you distribute the image, or if users
+interact with a modified copy over a network, the AGPL requires you to
+offer the corresponding source of both this service and OrcaSlicer.
