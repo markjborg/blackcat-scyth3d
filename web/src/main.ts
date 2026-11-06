@@ -18,6 +18,9 @@ interface Printer {
   buildVolumeMm: { xMm: number; yMm: number; zMm: number } | null;
   materials: Material[];
   profiles: Profile[];
+  fleet?: boolean;
+  fleetCount?: number;
+  note?: string;
 }
 interface Catalog {
   printers: Printer[];
@@ -50,6 +53,14 @@ interface JobResult {
   dimensionsMm?: { x: number; y: number; z: number } | null;
   volumeMl?: number;
   warnings?: string[];
+  plates?: Array<{
+    index: number;
+    filamentGrams: number | null;
+    resinMl: number | null;
+    printTimeText: string;
+    layerCount: number;
+    previewUrl?: string;
+  }>;
 }
 interface Job {
   id: string;
@@ -58,7 +69,7 @@ interface Job {
   result?: JobResult;
   quote?: Quote;
   error?: { message: string };
-  downloads?: { gcode: string; threeMf: string };
+  downloads?: { gcode?: string; threeMf?: string; archive?: string };
 }
 
 const app = document.querySelector("#app");
@@ -73,7 +84,11 @@ app.innerHTML = `
           <p>MakerLab · Malta</p>
         </div>
       </div>
-      <form method="post" action="/logout"><button class="ghost" type="submit">Log out</button></form>
+      <nav class="tools">
+        <button class="ghost" type="button" id="show-single">One model</button>
+        <button class="ghost" type="button" id="show-fleet">Prepare plates</button>
+        <form method="post" action="/logout"><button class="ghost" type="submit">Log out</button></form>
+      </nav>
     </header>
     <main class="layout">
       <section class="stage" id="stage">
@@ -115,6 +130,18 @@ app.innerHTML = `
           <span id="layer-label"></span>
         </label>
       </form>
+      <section class="panel" id="fleet" hidden>
+        <p class="muted">Fleet plates use Ann's quoting presets. Add models and quantities, then prepare. H2C is flagged: OrcaSlicer 2.4.2 has no official profile.</p>
+        <label>Fleet printer<select id="fleet-printer"></select></label>
+        <p class="muted" id="fleet-note"></p>
+        <label>Material<select id="fleet-material"></select></label>
+        <label class="checks"><input id="fleet-supports" type="checkbox" checked> Supports</label>
+        <div id="fleet-files"></div>
+        <button class="file-btn" type="button" id="fleet-add">Add a model</button>
+        <button class="primary" id="fleet-go" type="button">Prepare plates</button>
+        <p class="alert" id="fleet-alert" hidden></p>
+        <div id="fleet-result"></div>
+      </section>
     </main>
   </div>
   <input id="file" type="file" accept=".stl,.obj,.3mf,model/stl" hidden>
@@ -194,6 +221,187 @@ must<HTMLFormElement>("#panel").addEventListener("submit", (event) => {
 
 void boot();
 
+const fleetPanel = must<HTMLElement>("#fleet");
+const singlePanel = must<HTMLFormElement>("#panel");
+const fleetPrinter = must<HTMLSelectElement>("#fleet-printer");
+const fleetMaterial = must<HTMLSelectElement>("#fleet-material");
+const fleetNote = must<HTMLElement>("#fleet-note");
+const fleetFiles = must<HTMLElement>("#fleet-files");
+const fleetAlert = must<HTMLElement>("#fleet-alert");
+const fleetResult = must<HTMLElement>("#fleet-result");
+const fleetFileInput = document.createElement("input");
+fleetFileInput.type = "file";
+fleetFileInput.accept = ".stl,.obj,.3mf";
+fleetFileInput.hidden = true;
+document.body.append(fleetFileInput);
+const fleetQueue: Array<{ file: File; quantity: number }> = [];
+
+document.body.classList.add("mode-single");
+must<HTMLButtonElement>("#show-fleet").addEventListener("click", () => {
+  document.body.classList.add("mode-fleet");
+  document.body.classList.remove("mode-single");
+  fleetPanel.hidden = false;
+});
+must<HTMLButtonElement>("#show-single").addEventListener("click", () => {
+  document.body.classList.add("mode-single");
+  document.body.classList.remove("mode-fleet");
+  fleetPanel.hidden = true;
+});
+fleetPrinter.addEventListener("change", fillFleetMaterials);
+must<HTMLButtonElement>("#fleet-add").addEventListener("click", () => fleetFileInput.click());
+fleetFileInput.addEventListener("change", () => {
+  const file = fleetFileInput.files?.[0];
+  fleetFileInput.value = "";
+  if (!file) return;
+  fleetQueue.push({ file, quantity: 1 });
+  renderFleetQueue();
+});
+must<HTMLButtonElement>("#fleet-go").addEventListener("click", () => void prepareFleet());
+
+function fillFleet(): void {
+  fleetPrinter.replaceChildren();
+  for (const printer of catalog?.printers.filter((item) => item.fleet) ?? []) {
+    const option = document.createElement("option");
+    option.value = printer.id;
+    option.textContent = printer.fleetCount ? `${printer.name} · ${printer.fleetCount} in the lab` : printer.name;
+    fleetPrinter.append(option);
+  }
+  if ([...fleetPrinter.options].some((option) => option.value === "bambu-p1s")) fleetPrinter.value = "bambu-p1s";
+  fillFleetMaterials();
+}
+
+function fillFleetMaterials(): void {
+  const printer = catalog?.printers.find((item) => item.id === fleetPrinter.value);
+  fleetNote.textContent = printer?.note ?? "";
+  fleetMaterial.replaceChildren();
+  for (const material of printer?.materials ?? []) {
+    const option = document.createElement("option");
+    option.value = material.id;
+    option.textContent = material.name;
+    fleetMaterial.append(option);
+  }
+}
+
+function renderFleetQueue(): void {
+  fleetFiles.replaceChildren(
+    ...fleetQueue.map((item, index) => {
+      const row = document.createElement("label");
+      row.textContent = item.file.name;
+      const quantity = document.createElement("input");
+      quantity.type = "number";
+      quantity.min = "1";
+      quantity.max = "40";
+      quantity.value = String(item.quantity);
+      quantity.addEventListener("input", () => {
+        item.quantity = Math.max(1, Math.min(40, Number(quantity.value) || 1));
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => {
+        fleetQueue.splice(index, 1);
+        renderFleetQueue();
+      });
+      row.append(quantity, remove);
+      return row;
+    }),
+  );
+}
+
+async function prepareFleet(): Promise<void> {
+  fleetAlert.hidden = true;
+  if (fleetQueue.length === 0) {
+    fleetAlert.hidden = false;
+    fleetAlert.textContent = "Add at least one model.";
+    return;
+  }
+  const button = must<HTMLButtonElement>("#fleet-go");
+  button.disabled = true;
+  button.textContent = "Preparing plates…";
+  try {
+    const models = [];
+    for (const item of fleetQueue) {
+      const body = new FormData();
+      body.set("file", item.file, item.file.name);
+      const uploaded = await fetch("/v1/models", { method: "POST", body, credentials: "same-origin" });
+      const payload = (await uploaded.json()) as { id?: string; error?: { message: string } };
+      if (!uploaded.ok || !payload.id) throw new Error(payload.error?.message ?? "Upload failed.");
+      models.push({ modelId: payload.id, quantity: item.quantity });
+    }
+    const response = await fetch("/v1/plates", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        printerId: fleetPrinter.value,
+        materialId: fleetMaterial.value,
+        supports: must<HTMLInputElement>("#fleet-supports").checked,
+        models,
+        wait: true,
+      }),
+    });
+    const job = (await response.json()) as Job & { error?: { message: string } };
+    if (!response.ok || job.status === "failed") throw new Error(job.error?.message ?? "Plate preparation failed.");
+    renderFleetJob(job);
+  } catch (error) {
+    fleetAlert.hidden = false;
+    fleetAlert.textContent = error instanceof Error ? error.message : "Plate preparation failed.";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Prepare plates";
+  }
+}
+
+function renderFleetJob(job: Job): void {
+  fleetResult.replaceChildren();
+  const summary = document.createElement("div");
+  summary.className = "stats";
+  const grams = job.result?.filamentGrams ?? job.result?.grams;
+  summary.append(stat("Plates", String(job.result?.plates?.length ?? 0)), stat("Weight", grams !== undefined ? `${grams.toFixed(2)} g` : "—"));
+  if (job.result?.volumeMl !== undefined) summary.append(stat("Resin", `${job.result.volumeMl.toFixed(2)} ml`));
+  if (job.result?.printTimeText) summary.append(stat("Time", job.result.printTimeText));
+  fleetResult.append(summary);
+  if (job.quote) {
+    const total = document.createElement("p");
+    total.textContent = `Quote total ${eur(job.quote.totalEur)} · raw ${eur(job.quote.lines[0]?.rawEur ?? 0)} · line ${eur(job.quote.lines[0]?.netEur ?? 0)} · subtotal ${eur(job.quote.subtotalEur)} · VAT ${eur(job.quote.vatEur)}`;
+    fleetResult.append(total);
+  }
+  for (const plate of job.result?.plates ?? []) {
+    const block = document.createElement("figure");
+    const image = document.createElement("img");
+    const preview = plate.previewUrl;
+    if (preview) {
+      image.src = preview;
+      image.alt = `Plate ${plate.index} preview`;
+      image.style.width = "100%";
+      block.append(image);
+    }
+    const caption = document.createElement("figcaption");
+    caption.textContent = `Plate ${plate.index}: ${plate.filamentGrams ?? plate.resinMl ?? "—"} · ${plate.printTimeText} · ${plate.layerCount} layers`;
+    block.append(caption);
+    fleetResult.append(block);
+  }
+  const archive = job.downloads?.archive;
+  if (archive) fleetResult.append(link(archive, "Download all plates"));
+  for (const warning of job.result?.warnings ?? []) {
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.textContent = warning;
+    fleetResult.append(note);
+  }
+}
+
+function stat(label: string, value: string): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "stat";
+  const number = document.createElement("b");
+  number.textContent = value;
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  card.append(number, caption);
+  return card;
+}
+
 async function boot(): Promise<void> {
   const response = await fetch("/v1/catalog", { credentials: "same-origin" });
   if (response.status === 401) {
@@ -211,6 +419,7 @@ async function boot(): Promise<void> {
   fillMaterials();
   fillLayers();
   applyBed();
+  fillFleet();
 }
 
 async function loadFile(file: File): Promise<void> {
@@ -380,7 +589,9 @@ function renderJob(job: Job): void {
   );
   renderQuote(job.quote);
   downloads.replaceChildren();
-  if (job.downloads?.gcode) downloads.append(link(job.downloads.gcode, "Download G-code"), link(job.downloads.threeMf, "Download 3MF"));
+  if (job.downloads?.gcode && job.downloads.threeMf) {
+    downloads.append(link(job.downloads.gcode, "Download G-code"), link(job.downloads.threeMf, "Download 3MF"));
+  }
   if (result?.warnings?.length) {
     const note = document.createElement("p");
     note.className = "muted";

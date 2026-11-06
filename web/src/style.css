@@ -25,6 +25,7 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 14px 18px; border-bottom: 1px solid var(--line);
 }
+.top nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand svg { width: 34px; height: 26px; flex: none; }
 .brand h1 {
@@ -41,6 +42,9 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
   flex: 1; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, 420px);
   min-height: 0;
 }
+.layout > .panel, .layout > #fleet { grid-column: 2; grid-row: 1; }
+body.mode-fleet #panel { display: none; }
+body.mode-single #fleet { display: none; }
 .stage {
   position: relative; min-height: 420px; background:
     radial-gradient(900px 420px at 50% 80%, rgba(224, 164, 74, 0.08), transparent 60%),

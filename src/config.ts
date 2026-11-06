@@ -16,6 +16,7 @@ export interface Config {
   cleanupIntervalMs: number;
   orcaBin: string;
   orcaResources: string;
+  prusaBin: string | null;
   allowedHosts: string[] | null;
   uiPassword: string | null;
   sessionSecret: string | null;
@@ -53,6 +54,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     cleanupIntervalMs: positiveInt(env.SCYTH3D_CLEANUP_INTERVAL_SEC, 3600) * 1000,
     orcaBin: env.ORCA_SLICER_BIN?.trim() || "orca-slicer",
     orcaResources: env.ORCA_RESOURCES?.trim() || "/opt/orcaslicer/resources",
+    prusaBin: env.PRUSA_SLICER_BIN?.trim() || null,
     allowedHosts: allowed ? allowed.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean) : null,
     uiPassword,
     sessionSecret,

@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { ApiError } from "./errors.js";
 import { parseModel } from "./mesh/parse.js";
 import { quoteLines, RESIN_DENSITY_G_PER_ML, type Quote, type QuoteLineInput } from "./pricing.js";
-import { resolveFdm, type ResolvedFdm } from "./profiles/catalog.js";
+import { findPrinter, resolveFdm, type Printer, type ResolvedFdm } from "./profiles/catalog.js";
 import { TaskQueue } from "./queue.js";
 import type { Config } from "./config.js";
 import { Store, type JobRecord, type ModelRecord } from "./store.js";
 import type { SliceRequest, SlicerEngine } from "./slicer/orca.js";
+import { sliceFleetPlates, zipJobOutput } from "./slicer/plates.js";
+import { sliceSl1s } from "./slicer/resin.js";
 
 export interface SliceInput {
   modelId: string;
@@ -158,6 +162,184 @@ export class ScythService {
     return this.store.readModel(id);
   }
 
+  async preparePlates(
+    input: {
+      printerId: string;
+      materialId: string;
+      infillPercent?: number;
+      supports?: boolean;
+      models: Array<{ modelId: string; quantity: number }>;
+    },
+    wait: boolean,
+  ): Promise<JobRecord> {
+    if (input.models.length === 0) throw new ApiError(400, "empty_plate", "Add at least one model.");
+    const printer = findPrinterSafe(input.printerId);
+    if (!printer.fleet) {
+      throw new ApiError(400, "not_in_fleet", `${printer.name} is not part of the plate-preparation fleet.`);
+    }
+    const expanded = await this.expandModels(input.models);
+    const primary = expanded[0];
+    if (!primary) throw new ApiError(400, "empty_plate", "Add at least one model.");
+    const job: JobRecord = {
+      id: randomUUID(),
+      type: "plates",
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      modelId: primary.model.id,
+      request: {
+        printerId: input.printerId,
+        materialId: input.materialId,
+        infillPercent: input.infillPercent,
+        supports: input.supports,
+        models: expanded.map((item) => ({ modelId: item.model.id, quantity: item.quantity, filename: item.model.filename })),
+      },
+    };
+    await this.store.saveJob(job);
+    const task = this.queue.run(async () => {
+      const current = await this.store.readJob(job.id);
+      current.status = "running";
+      current.updatedAt = new Date().toISOString();
+      await this.store.saveJob(current);
+      try {
+        const inputDir = path.join(this.store.jobDir(job.id), "input");
+        await mkdir(inputDir, { recursive: true });
+        const paths: string[] = [];
+        let copyIndex = 0;
+        for (const item of expanded) {
+          for (let i = 0; i < item.quantity; i += 1) {
+            copyIndex += 1;
+            const dest = path.join(inputDir, `${copyIndex}-${item.model.filename}`);
+            await copyFile(this.store.modelFile(item.model), dest);
+            paths.push(dest);
+          }
+        }
+        if (printer.quotingPack && (input.materialId === "pla" || input.materialId === "petg")) {
+          const sliced = await sliceFleetPlates({
+            orcaBin: this.config.orcaBin,
+            printer,
+            materialId: input.materialId,
+            modelPaths: paths,
+            workDir: this.store.jobDir(job.id),
+            infillPercent: input.infillPercent,
+            supports: input.supports,
+            timeoutMs: this.config.sliceTimeoutMs,
+          });
+          const outputDir = path.join(this.store.jobDir(job.id), "output");
+          const first = sliced.plates[0];
+          if (!first) throw new ApiError(422, "slice_failed", "OrcaSlicer produced no plates.");
+          await copyFile(path.join(outputDir, first.gcodeName), this.store.gcodeFile(job.id));
+          await copyFile(path.join(outputDir, sliced.projectName), this.store.threeMfFile(job.id));
+          if (sliced.plates.length === 1) {
+            await copyFile(path.join(outputDir, sliced.projectName), path.join(outputDir, "plate_1.gcode.3mf"));
+          }
+          await writeFile(path.join(outputDir, "archive.zip"), await zipJobOutput(outputDir));
+          current.status = "succeeded";
+          current.result = {
+            filamentGrams: sliced.filamentGrams,
+            grams: sliced.filamentGrams,
+            printTimeSeconds: sliced.printTimeSeconds,
+            printTimeText: formatDuration(sliced.printTimeSeconds),
+            layerCount: sliced.plates[0]?.layerCount,
+            engine: "OrcaSlicer 2.4.2",
+            warnings: sliced.warnings,
+            plates: sliced.plates.map((plate) => ({
+              index: plate.index,
+              filamentGrams: plate.filamentGrams,
+              resinMl: null,
+              printTimeSeconds: plate.printTimeSeconds,
+              printTimeText: plate.printTimeText,
+              layerCount: plate.layerCount,
+              gcodeName: plate.gcodeName,
+              previewName: plate.previewName,
+              printerFile: sliced.plates.length === 1 ? "plate_1.gcode.3mf" : undefined,
+            })),
+          };
+          current.outputs = { gcode: true, threeMf: true, archive: true };
+          current.quote = quoteLines([{ materialId: input.materialId, grams: sliced.filamentGrams, note: `${sliced.plates.length} plate(s)` }]);
+        } else if (printer.resinOutput === "sl1s") {
+          if (!this.config.prusaBin) {
+            throw new ApiError(500, "slicer_missing", "PRUSA_SLICER_BIN is not set, so no .sl1s file was produced.");
+          }
+          if (input.materialId !== "standard-resin" && input.materialId !== "high-quality-resin") {
+            throw new ApiError(400, "unknown_material", "Resin plates use standard-resin or high-quality-resin.");
+          }
+          const sliced = await sliceSl1s({
+            prusaBin: this.config.prusaBin,
+            modelPaths: paths,
+            workDir: this.store.jobDir(job.id),
+            timeoutMs: this.config.sliceTimeoutMs,
+          });
+          const density = RESIN_DENSITY_G_PER_ML[input.materialId] ?? 1.1;
+          const grams = round3(sliced.resinMl * density);
+          const outputDir = path.join(this.store.jobDir(job.id), "output");
+          await writeFile(path.join(outputDir, "archive.zip"), await zipJobOutput(outputDir));
+          current.status = "succeeded";
+          current.result = {
+            volumeMl: sliced.resinMl,
+            grams,
+            densityGPerMl: density,
+            printTimeSeconds: sliced.printTimeSeconds,
+            printTimeText: sliced.printTimeText,
+            layerCount: sliced.layerCount,
+            engine: "PrusaSlicer 2.8.1 SLA",
+            warnings: sliced.warnings,
+            plates: [
+              {
+                index: 1,
+                filamentGrams: null,
+                resinMl: sliced.resinMl,
+                printTimeSeconds: sliced.printTimeSeconds,
+                printTimeText: sliced.printTimeText,
+                layerCount: sliced.layerCount,
+                previewName: sliced.previewName,
+                printerFile: sliced.printerFileName,
+              },
+            ],
+          };
+          current.outputs = { gcode: false, threeMf: false, archive: true };
+          current.quote = quoteLines([{ materialId: input.materialId, grams, note: "sliced resin including supports" }]);
+        } else if (printer.technology === "resin") {
+          throw new ApiError(
+            422,
+            "resin_format_unavailable",
+            `${printer.note ?? `${printer.name} has no printer-ready output in this build.`} No .goo or .ctb file was written.`,
+          );
+        } else {
+          throw new ApiError(400, "not_in_fleet", `${printer.name} cannot prepare plates.`);
+        }
+      } catch (error) {
+        current.status = "failed";
+        current.error =
+          error instanceof ApiError
+            ? { code: error.code, message: error.message }
+            : { code: "slice_failed", message: error instanceof Error ? error.message : "Plate preparation failed." };
+      }
+      current.updatedAt = new Date().toISOString();
+      await this.store.saveJob(current);
+      return current;
+    });
+    if (!wait) {
+      task.catch((error: unknown) => console.error("plate job failed", job.id, error instanceof Error ? error.message : error));
+      return job;
+    }
+    return task;
+  }
+
+  private async expandModels(models: Array<{ modelId: string; quantity: number }>): Promise<Array<{ model: ModelRecord; quantity: number }>> {
+    let total = 0;
+    const expanded: Array<{ model: ModelRecord; quantity: number }> = [];
+    for (const item of models) {
+      if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 40) {
+        throw new ApiError(400, "invalid_quantity", "Quantity must be a whole number from 1 to 40.");
+      }
+      total += item.quantity;
+      if (total > 40) throw new ApiError(400, "too_many_objects", "A plate job can hold at most 40 objects.");
+      expanded.push({ model: await this.store.readModel(item.modelId), quantity: item.quantity });
+    }
+    return expanded;
+  }
+
   private async executeSlice(jobId: string, model: ModelRecord, selection: ResolvedFdm, input: SliceInput): Promise<JobRecord> {
     const job = await this.store.readJob(jobId);
     job.status = "running";
@@ -222,6 +404,21 @@ function selectFdm(input: SliceInput): ResolvedFdm {
   } catch (error) {
     throw new ApiError(400, "invalid_selection", error instanceof Error ? error.message : "Invalid printer, material, or profile.");
   }
+}
+
+function findPrinterSafe(id: string): Printer {
+  const printer = findPrinter(id);
+  if (!printer) throw new ApiError(400, "unknown_printer", `Unknown printer '${id}'.`);
+  return printer;
+}
+
+function formatDuration(seconds: number): string {
+  const whole = Math.round(seconds);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = whole % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${rest}s`;
+  return `${minutes}m ${rest}s`;
 }
 
 function safeFilename(name: string): string {

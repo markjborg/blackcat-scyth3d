@@ -35,11 +35,24 @@ export interface JobResult {
   engine?: string;
   bedType?: string;
   warnings?: string[];
+  plates?: PlateResult[];
+}
+
+export interface PlateResult {
+  index: number;
+  filamentGrams: number | null;
+  resinMl: number | null;
+  printTimeSeconds: number;
+  printTimeText: string;
+  layerCount: number;
+  gcodeName?: string;
+  previewName: string;
+  printerFile?: string;
 }
 
 export interface JobRecord {
   id: string;
-  type: "fdm" | "resin";
+  type: "fdm" | "resin" | "plates";
   status: "queued" | "running" | "succeeded" | "failed";
   createdAt: string;
   updatedAt: string;
@@ -50,11 +63,12 @@ export interface JobRecord {
     profileId?: string;
     infillPercent?: number;
     supports?: boolean;
+    models?: Array<{ modelId: string; quantity: number; filename: string }>;
   };
   result?: JobResult;
   quote?: Quote;
   error?: { code: string; message: string };
-  outputs?: { gcode: boolean; threeMf: boolean };
+  outputs?: { gcode: boolean; threeMf: boolean; archive?: boolean };
 }
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

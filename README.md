@@ -65,7 +65,13 @@ Do not commit `.env`. The API key and the UI password are read only from the env
 
 ## Browser
 
-The page at `/` is a dark slicer: drag-and-drop STL, 3MF, or OBJ, a three.js plate for the selected printer, orbit and zoom, 90° rotates, scale, and lay-flat. Layer height maps to the 0.16 / 0.20 / 0.24 mm profiles. Infill and supports are sent with the slice. Resin runs the volume estimator. The receipt shows raw price, the €2.50 line minimum, the €10 order minimum, VAT, and the total. G-code and 3MF download from the job. After an FDM slice, a layer slider draws the extrusion moves on the plate.
+The page at `/` is a dark slicer: drag-and-drop STL, 3MF, or OBJ, a three.js plate for the selected printer, orbit and zoom, 90° rotates, scale, and lay-flat. Layer height maps to the 0.16 / 0.20 / 0.24 mm profiles. Infill and supports are sent with the slice. A single resin model still uses the mesh-volume estimator. The receipt shows raw price, the €2.50 line minimum, the €10 order minimum, VAT, and the total. G-code and 3MF download from the job. After an FDM slice, a layer slider draws the extrusion moves on the plate.
+
+**Prepare plates** is the fleet path. Choose a lab machine, add models and quantities, and the service auto-orients and arranges them with OrcaSlicer, slices every plate, and offers a zip of G-code, `.gcode.3mf`, and a preview. MCP `prepare_plates` writes the same kind of job, which `get_job` can read. There is no Bambu cloud connection.
+
+H2C has no official profile in OrcaSlicer 2.4.2. Those slices are Ann's H2D proxy and the job says so. P1S and X1 Carbon quoting presets cap Z at 250 mm. The Giga uses the official 0.6 mm / 0.30 mm preset. All of Ann's packs are quoting defaults, not production-validated.
+
+The Prusa SL1S is sliced with PrusaSlicer 2.8.1 when `PRUSA_SLICER_BIN` is set: supports, pad, hollowing, and a real `.sl1s`. Exposure is the bundled Prusament 0.1 mm preset and must be calibrated. Saturn 4 Ultra 16K `.goo` and Jupiter 6K `.ctb` are not written. A converted SL1S file would not match those LCDs, so the service refuses those jobs instead of inventing a file.
 
 Rotate, scale, and lay-flat are baked into the STL that gets uploaded, so the slice matches the view. The plate origin is the front-left corner, in millimetres, same as the Bambu presets.
 

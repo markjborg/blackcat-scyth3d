@@ -107,6 +107,47 @@ export function createApp(config: Config, service: ScythService): AppBundle {
     const model = await service.getModel(job.modelId);
     res.download(service.store.gcodeFile(job.id), downloadName(model.filename, "gcode"));
   }));
+  app.post("/v1/plates", wrap(async (req, res) => {
+    const body = objectBody(req.body);
+    const models = Array.isArray(body.models) ? body.models : [];
+    const wait = body.wait === true;
+    const job = await service.preparePlates(
+      {
+        printerId: requiredString(body.printerId, "printerId"),
+        materialId: requiredString(body.materialId, "materialId"),
+        infillPercent: optionalNumber(body.infillPercent, "infillPercent"),
+        supports: optionalBoolean(body.supports, "supports"),
+        models: models.map((item) => {
+          const record = objectBody(item);
+          return {
+            modelId: requiredString(record.modelId, "modelId"),
+            quantity: record.quantity === undefined ? 1 : requiredNumber(record.quantity, "quantity"),
+          };
+        }),
+      },
+      wait,
+    );
+    res.status(wait ? 200 : 202).json(presentJob(job));
+  }));
+  app.get("/v1/jobs/:id/archive", wrap(async (req, res) => {
+    const job = await service.getJob(routeId(req.params.id));
+    if (job.status !== "succeeded" || !job.outputs?.archive) {
+      throw new ApiError(409, "not_ready", "The plate archive is available after preparation succeeds.");
+    }
+    res.download(path.join(service.store.jobDir(job.id), "output", "archive.zip"), "plates.zip");
+  }));
+  app.get("/v1/jobs/:id/plates/:index/preview.png", wrap(async (req, res) => {
+    const plate = await plateFile(service, routeId(req.params.id), routeIdNumber(req.params.index), "preview");
+    res.type("image/png").sendFile(plate);
+  }));
+  app.get("/v1/jobs/:id/plates/:index/gcode", wrap(async (req, res) => {
+    const file = await plateFile(service, routeId(req.params.id), routeIdNumber(req.params.index), "gcode");
+    res.download(file, path.basename(file));
+  }));
+  app.get("/v1/jobs/:id/plates/:index/printer", wrap(async (req, res) => {
+    const file = await plateFile(service, routeId(req.params.id), routeIdNumber(req.params.index), "printer");
+    res.download(file, path.basename(file));
+  }));
   app.get("/v1/jobs/:id/3mf", wrap(async (req, res) => {
     const job = await readyFdmJob(service, routeId(req.params.id));
     const model = await service.getModel(job.modelId);
@@ -264,6 +305,22 @@ function wrap(fn: (req: Request, res: Response) => Promise<void>) {
 
 function routeId(value: string | string[]): string {
   return assertId(Array.isArray(value) ? value[0] ?? "" : value);
+}
+
+function routeIdNumber(value: string | string[]): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const index = Number(raw);
+  if (!Number.isInteger(index) || index < 1) throw new ApiError(400, "invalid_plate", "Plate numbers start at 1.");
+  return index;
+}
+
+async function plateFile(service: ScythService, jobId: string, index: number, kind: "preview" | "gcode" | "printer"): Promise<string> {
+  const job = await service.getJob(jobId);
+  const plate = job.result?.plates?.find((item) => item.index === index);
+  if (!plate || job.status !== "succeeded") throw new ApiError(404, "plate_not_found", `Plate ${index} is not in this job.`);
+  const name = kind === "preview" ? plate.previewName : kind === "gcode" ? plate.gcodeName : plate.printerFile;
+  if (!name || name.includes("/") || name.includes("\\")) throw new ApiError(404, "plate_not_found", `Plate ${index} has no ${kind} file.`);
+  return path.join(service.store.jobDir(job.id), "output", name);
 }
 
 function objectBody(value: unknown): Record<string, unknown> {

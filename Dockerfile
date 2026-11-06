@@ -51,6 +51,7 @@ COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
+COPY profiles ./profiles
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin scyth3d \
     && chown -R scyth3d:scyth3d /app /data /tmp/scyth3d-home

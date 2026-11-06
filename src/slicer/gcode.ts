@@ -18,14 +18,15 @@ export interface ModelInfo {
 
 export function parseGcodeStats(gcode: string): GcodeStats {
   const head = gcode.slice(0, 12_000);
-  const tail = gcode.slice(-8_000);
-  const timeMatch = /total estimated time:\s*([^;\r\n]+)/i.exec(head);
-  const modelTimeMatch = /model printing time:\s*([^;\r\n]+)/i.exec(head);
+  const timeMatch =
+    /total estimated time:\s*([^;\r\n]+)/i.exec(head) ??
+    /estimated printing time \(normal mode\)\s*=\s*([^\r\n]+)/i.exec(gcode);
+  const modelTimeMatch = /model printing time:\s*([^;\r\n]+)/i.exec(head) ?? /model printing time:\s*([^;\r\n]+)/i.exec(gcode);
   const layers = /total layer number:\s*(\d+)/i.exec(head);
   return {
-    filamentGrams: sumMetric(tail, "g"),
-    filamentVolumeCm3: sumMetric(tail, "cm3"),
-    filamentLengthMm: sumMetric(tail, "mm"),
+    filamentGrams: sumMetric(gcode, "g"),
+    filamentVolumeCm3: sumMetric(gcode, "cm3"),
+    filamentLengthMm: sumMetric(gcode, "mm"),
     printTimeText: timeMatch?.[1]?.trim() ?? null,
     printTimeSeconds: timeMatch ? parseDuration(timeMatch[1]) : null,
     modelPrintTimeText: modelTimeMatch?.[1]?.trim() ?? null,

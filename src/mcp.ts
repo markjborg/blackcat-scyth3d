@@ -86,10 +86,52 @@ export function registerTools(server: McpServer, service: ScythService): void {
   );
 
   server.registerTool(
+    "prepare_plates",
+    {
+      title: "Orient, arrange, and slice plates",
+      description:
+        "Auto-orient and arrange one or more uploaded models onto a MakerLab fleet printer, slice every plate, and quote from the sliced grams or resin volume. No Bambu cloud. H2C uses an H2D proxy because OrcaSlicer 2.4.2 has no H2C preset. Elegoo resin printers do not get a fake .goo or .ctb file. The SL1S returns a real .sl1s when PrusaSlicer is configured. Upload models with POST /v1/models first, then pass modelId and quantity. get_job reads the same job.",
+      inputSchema: z.object({
+        printerId: z.string(),
+        materialId: z.enum(["pla", "petg", "standard-resin", "high-quality-resin"]),
+        infillPercent: z.number().int().min(0).max(100).optional(),
+        supports: z.boolean().optional(),
+        models: z
+          .array(
+            z.object({
+              modelId: z.string(),
+              quantity: z.number().int().min(1).max(40).optional(),
+            }),
+          )
+          .min(1)
+          .max(20),
+      }),
+    },
+    async (input) => {
+      try {
+        const job = await service.preparePlates(
+          {
+            printerId: input.printerId,
+            materialId: input.materialId,
+            infillPercent: input.infillPercent,
+            supports: input.supports,
+            models: input.models.map((model) => ({ modelId: model.modelId, quantity: model.quantity ?? 1 })),
+          },
+          true,
+        );
+        if (job.status === "failed") return toolError(job.error?.message ?? "Plate preparation failed.", presentJob(job));
+        return jsonResult(presentJob(job));
+      } catch (error) {
+        return toolError(messageOf(error));
+      }
+    },
+  );
+
+  server.registerTool(
     "get_job",
     {
-      title: "Get a slice or resin job",
-      description: "Fetch a job by id, including status, slice statistics, quote, and download paths.",
+      title: "Get a slice or plate job",
+      description: "Fetch a job by id, including plate files, sliced weight or volume, quote, and download paths. Jobs created in the browser are visible here.",
       inputSchema: z.object({ jobId: z.string() }),
     },
     async ({ jobId }) => {
