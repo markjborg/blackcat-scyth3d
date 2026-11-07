@@ -11,7 +11,7 @@ COPY src ./src
 COPY web ./web
 RUN npm run build && npm prune --omit=dev
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS worker
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
@@ -62,4 +62,21 @@ EXPOSE 8080
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/worker.js"]
+
+FROM node:22-bookworm AS server
+WORKDIR /app
+ENV NODE_ENV=production \
+    SCYTH3D_ALL_IN_ONE=0 \
+    SCYTH3D_DATA_DIR=/data \
+    PORT=8080
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/public ./public
+COPY profiles ./profiles
+COPY brand ./brand
+RUN mkdir -p /data
+EXPOSE 8080
+VOLUME ["/data"]
 CMD ["node", "dist/index.js"]

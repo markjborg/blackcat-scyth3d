@@ -1,14 +1,13 @@
 import { stat } from "node:fs/promises";
+import { isActive } from "./jobs/lease.js";
 import type { Store } from "./store.js";
 
 export async function cleanupExpired(store: Store, ttlMs: number, now = Date.now()): Promise<number> {
   const jobs = await store.listJobs();
-  const protectedModels = new Set(
-    jobs.filter((job) => job.status === "queued" || job.status === "running").map((job) => job.modelId),
-  );
+  const protectedModels = new Set(jobs.filter((job) => isActive(job.status)).map((job) => job.modelId));
   let removed = 0;
   for (const job of jobs) {
-    if (job.status === "queued" || job.status === "running") continue;
+    if (isActive(job.status)) continue;
     if (await olderThan(store.jobDir(job.id), ttlMs, now)) {
       await store.removeJob(job.id);
       removed += 1;
@@ -24,18 +23,23 @@ export async function cleanupExpired(store: Store, ttlMs: number, now = Date.now
   return removed;
 }
 
-export async function failInterruptedJobs(store: Store): Promise<number> {
+/** A restart drops in-progress claims. Queued jobs stay queued for the next worker. */
+export async function requeueInProgress(store: Store): Promise<number> {
   const jobs = await store.listJobs();
   let changed = 0;
   for (const job of jobs) {
-    if (job.status !== "queued" && job.status !== "running") continue;
-    job.status = "failed";
+    if (job.status !== "claimed" && job.status !== "slicing" && job.status !== "running") continue;
+    job.status = "queued";
+    job.claim = undefined;
     job.updatedAt = new Date().toISOString();
-    job.error = { code: "interrupted", message: "The service restarted before this job finished." };
     await store.saveJob(job);
     changed += 1;
   }
   return changed;
+}
+
+export async function failInterruptedJobs(store: Store): Promise<number> {
+  return requeueInProgress(store);
 }
 
 async function olderThan(dir: string, ttlMs: number, now: number): Promise<boolean> {

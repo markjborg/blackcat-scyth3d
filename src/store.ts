@@ -50,12 +50,21 @@ export interface PlateResult {
   printerFile?: string;
 }
 
+export interface JobClaim {
+  workerId: string;
+  claimedAt: string;
+  leaseExpiresAt: string;
+}
+
 export interface JobRecord {
   id: string;
   type: "fdm" | "resin" | "plates";
-  status: "queued" | "running" | "succeeded" | "failed";
+  /** queued and claimed wait on a worker. slicing is in progress. done is finished. running and succeeded are older names. */
+  status: "queued" | "claimed" | "slicing" | "running" | "done" | "succeeded" | "failed";
   createdAt: string;
   updatedAt: string;
+  attempts?: number;
+  claim?: JobClaim;
   modelId: string;
   request: {
     printerId: string;

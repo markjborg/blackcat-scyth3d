@@ -1,0 +1,15 @@
+# Shop worker. Outbound only: no ports are published.
+# Point SCYTH3D_SERVER_URL at the lab server.
+services:
+  worker:
+    build:
+      context: .
+      target: worker
+    env_file:
+      - .env
+    environment:
+      SCYTH3D_SERVER_URL: ${SCYTH3D_SERVER_URL:?Set SCYTH3D_SERVER_URL in .env}
+      SCYTH3D_WORKER_TOKEN: ${SCYTH3D_WORKER_TOKEN:?Set SCYTH3D_WORKER_TOKEN in .env}
+      ORCA_SLICER_BIN: /opt/orcaslicer/bin/orca-slicer
+      ORCA_RESOURCES: /opt/orcaslicer/resources
+    restart: unless-stopped

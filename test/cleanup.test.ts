@@ -30,7 +30,7 @@ describe("cleanup", () => {
     }
   });
 
-  it("marks queued jobs as interrupted after a restart", async () => {
+  it("returns a claimed job to the queue after a restart", async () => {
     const { config, cleanup } = await tempConfig();
     try {
       const store = new Store(config.dataDir);
@@ -38,7 +38,8 @@ describe("cleanup", () => {
       await store.saveJob({
         id: "11111111-1111-4111-8111-111111111111",
         type: "fdm",
-        status: "running",
+        status: "slicing",
+        attempts: 1,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         modelId: "22222222-2222-4222-8222-222222222222",
@@ -46,8 +47,8 @@ describe("cleanup", () => {
       });
       assert.equal(await failInterruptedJobs(store), 1);
       const job = await store.readJob("11111111-1111-4111-8111-111111111111");
-      assert.equal(job.status, "failed");
-      assert.equal(job.error?.code, "interrupted");
+      assert.equal(job.status, "queued");
+      assert.equal(job.attempts, 1);
     } finally {
       await cleanup();
     }

@@ -19,6 +19,7 @@ export async function tempConfig(overrides: NodeJS.ProcessEnv = {}): Promise<{ c
     SCYTH3D_DATA_DIR: dataDir,
     SCYTH3D_JOB_TTL_HOURS: "48",
     SCYTH3D_MAX_UPLOAD_MB: "20",
+    SCYTH3D_ALL_IN_ONE: "1",
     ...overrides,
   });
   return { config, cleanup: () => rm(dataDir, { recursive: true, force: true }) };

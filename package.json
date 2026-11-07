@@ -12,6 +12,8 @@
     "dev": "tsx src/index.ts",
     "build": "tsc && vite build",
     "start": "node dist/index.js",
+    "worker": "tsx src/worker.ts",
+    "start:worker": "node dist/worker.js",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "test": "tsx --test --test-concurrency=1 test/**/*.test.ts"
   },

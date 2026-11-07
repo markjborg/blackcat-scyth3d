@@ -34,19 +34,54 @@ Resin grams use a closed-mesh volume and these densities: Standard Resin 1.10 g/
 
 ```bash
 cp .env.example .env
-# put long random values in SCYTH3D_API_KEY and SCYTH3D_UI_PASSWORD
+# put long random values in SCYTH3D_API_KEY, SCYTH3D_UI_PASSWORD, and SCYTH3D_WORKER_TOKEN
 docker compose up --build
 ```
 
 Open `http://127.0.0.1:8080`, sign in with the UI password, and drop a model on the plate. The API listens on the same port. Models and jobs are stored in the `scyth3d-data` volume and removed after `SCYTH3D_JOB_TTL_HOURS` (default 48).
 
-Do not commit `.env`. The API key and the UI password are read only from the environment. The browser bundle does not contain the API key.
+The server image does not slice. A shop worker pulls jobs. See below.
+
+Do not commit `.env`. The API key, the UI password, and the worker token are read only from the environment. None of them are written into the browser bundle or into logs.
+
+## Shop worker
+
+The lab server queues FDM and plate jobs. A worker on Mark's Mac or a shop PC makes outbound requests only. It does not open a port. It heartbeats, claims a job, slices with the local OrcaSlicer or PrusaSlicer, and uploads the result. The claim lasts `SCYTH3D_LEASE_SEC` (default 120). If the worker disappears, the job returns to the queue. After three dropped leases it is marked failed.
+
+Set `SCYTH3D_WORKER_TOKEN` to a different long random string from `SCYTH3D_API_KEY` on both sides. The server refuses to start if they match. The token is not printed.
+
+The slicer page shows **Worker online** or **No shop worker is online**. MCP `slice_model` and `prepare_plates` queue the same jobs. `get_job` returns the result when the worker finishes.
+
+Linux or a shop PC:
+
+```bash
+# .env also needs SCYTH3D_SERVER_URL=http://192.168.1.10:8080
+docker compose -f docker-compose.worker.yml up --build
+```
+
+That compose file publishes no ports. The worker image contains OrcaSlicer.
+
+macOS, native CLIs:
+
+```bash
+export SCYTH3D_SERVER_URL=http://192.168.1.10:8080
+export SCYTH3D_WORKER_TOKEN=the-same-token-as-the-server
+export ORCA_SLICER_BIN="/Applications/OrcaSlicer.app/Contents/MacOS/orca-slicer"
+export ORCA_RESOURCES="$HOME/Library/Application Support/OrcaSlicer/system"
+export PRUSA_SLICER_BIN="/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer"
+npm run worker
+```
+
+The Orca and Prusa paths vary by how they were installed. `ORCA_RESOURCES` must be the directory that contains `profiles/`. For an SL1S job the worker also needs `PRUSA_SLICER_BIN`. Docker Desktop on a Mac can use the same `docker-compose.worker.yml` instead of the native CLIs.
+
+`SCYTH3D_ALL_IN_ONE=1` makes this process slice jobs itself. That is for development and the automated tests, not for the shop server.
 
 ## Environment
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SCYTH3D_API_KEY` | required | Bearer token for the REST API and MCP. At least 8 characters. |
+| `SCYTH3D_WORKER_TOKEN` | unset | Bearer token for the shop worker. Must differ from the API key. |
 | `SCYTH3D_UI_PASSWORD` | unset | Password for the browser. At least 8 characters. Sessions are an HttpOnly cookie. |
 | `SCYTH3D_SESSION_SECRET` | derived | Optional signing key for the session cookie. At least 16 characters. |
 | `SCYTH3D_COOKIE_SECURE` | off | Set to `1` when the site is served over HTTPS. |

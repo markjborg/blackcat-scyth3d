@@ -1,10 +1,11 @@
+import { isDone } from "./jobs/lease.js";
 import type { JobRecord } from "./store.js";
 
 export function presentJob(job: JobRecord): JobRecord & {
   downloads?: { gcode?: string; threeMf?: string; archive?: string; quotePdf?: string };
 } {
   const downloads =
-    job.status === "succeeded"
+    isDone(job.status)
       ? {
           ...(job.outputs?.gcode
             ? { gcode: `/v1/jobs/${job.id}/gcode`, threeMf: `/v1/jobs/${job.id}/3mf` }

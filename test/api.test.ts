@@ -87,7 +87,7 @@ describe("auth and API", () => {
         quote: { totalEur: number };
         downloads: { gcode: string };
       };
-      assert.equal(job.status, "succeeded");
+      assert.equal(job.status, "done");
       assert.equal(job.result.filamentGrams, 3.67);
       assert.equal(job.result.layerCount, 100);
       assert.equal(job.quote.totalEur, 11.8);

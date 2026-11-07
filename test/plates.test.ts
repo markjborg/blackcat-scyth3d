@@ -45,7 +45,7 @@ describe("fleet plates", () => {
         quote: { totalEur: number; lines: Array<{ rawEur: number }> };
         downloads: { archive: string };
       };
-      assert.equal(body.status, "succeeded");
+      assert.equal(body.status, "done");
       assert.equal(body.result.plates.length, 1);
       assert.ok(body.result.filamentGrams > 6 && body.result.filamentGrams < 9, `grams ${body.result.filamentGrams}`);
       assert.equal(body.result.plates[0]?.layerCount, 100);
@@ -100,7 +100,7 @@ describe("fleet plates", () => {
           error?: { message: string };
           result?: { filamentGrams: number; printTimeText: string; layerCount: number; warnings?: string[] };
         };
-        assert.equal(body.status, "succeeded", body.error?.message);
+        assert.equal(body.status, "done", body.error?.message);
         assert.ok((body.result?.filamentGrams ?? 0) > 0);
         console.log(`PLATE_RESULT ${printerId} ${JSON.stringify({ grams: body.result?.filamentGrams, time: body.result?.printTimeText, layers: body.result?.layerCount, warnings: body.result?.warnings })}`);
       }
@@ -131,7 +131,7 @@ describe("fleet plates", () => {
       const job = await response.json();
       assert.equal(response.status, 200, JSON.stringify(job));
       const body = job as { status: string; error?: { message: string }; result?: { volumeMl: number; grams: number; printTimeText: string; layerCount: number } };
-      assert.equal(body.status, "succeeded", body.error?.message);
+      assert.equal(body.status, "done", body.error?.message);
       assert.ok((body.result?.volumeMl ?? 0) > 1);
       console.log(`PLATE_RESULT sl1s ${JSON.stringify(body.result)}`);
     } finally {

@@ -28,6 +28,21 @@ export function requireApiKeyOrSession(config: Config) {
   };
 }
 
+export function requireWorker(config: Config) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!config.workerToken) {
+      res.status(503).json({ error: { code: "worker_unconfigured", message: "The server has no worker token." } });
+      return;
+    }
+    const provided = tokenFrom(req);
+    if (!provided || !tokensMatch(provided, config.workerToken)) {
+      res.status(401).json({ error: { code: "unauthorized", message: "A valid worker token is required." } });
+      return;
+    }
+    next();
+  };
+}
+
 function bearerOk(req: Request, config: Config): boolean {
   const provided = tokenFrom(req);
   return Boolean(provided && tokensMatch(provided, config.apiKey));

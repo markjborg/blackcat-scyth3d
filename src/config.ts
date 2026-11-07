@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,12 @@ export interface Config {
   orcaBin: string;
   orcaResources: string;
   prusaBin: string | null;
+  /** When true, this process slices jobs itself. The shop default is a queue plus a worker. */
+  allInOne: boolean;
+  workerToken: string | null;
+  leaseMs: number;
+  workerOfflineMs: number;
+  queueWaitMs: number;
   allowedHosts: string[] | null;
   uiPassword: string | null;
   sessionSecret: string | null;
@@ -41,6 +47,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     throw new Error(`SCYTH3D_UI_PASSWORD must be at least ${MIN_API_KEY_LENGTH} characters.`);
   }
   const sessionSecret = resolveSessionSecret(env.SCYTH3D_SESSION_SECRET, uiPassword);
+  const workerToken = optionalSecret(env.SCYTH3D_WORKER_TOKEN, "SCYTH3D_WORKER_TOKEN");
+  if (workerToken && sameSecret(workerToken, apiKey)) {
+    throw new Error("SCYTH3D_WORKER_TOKEN must be different from SCYTH3D_API_KEY.");
+  }
   return {
     apiKey,
     host: env.HOST?.trim() || "0.0.0.0",
@@ -55,6 +65,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     orcaBin: env.ORCA_SLICER_BIN?.trim() || "orca-slicer",
     orcaResources: env.ORCA_RESOURCES?.trim() || "/opt/orcaslicer/resources",
     prusaBin: env.PRUSA_SLICER_BIN?.trim() || null,
+    allInOne: env.SCYTH3D_ALL_IN_ONE === "1" || env.SCYTH3D_ALL_IN_ONE === "true",
+    workerToken,
+    leaseMs: positiveInt(env.SCYTH3D_LEASE_SEC, 120) * 1000,
+    workerOfflineMs: positiveInt(env.SCYTH3D_WORKER_OFFLINE_SEC, 20) * 1000,
+    queueWaitMs: positiveInt(env.SCYTH3D_QUEUE_WAIT_SEC, 20) * 1000,
     allowedHosts: allowed ? allowed.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean) : null,
     uiPassword,
     sessionSecret,
@@ -73,6 +88,22 @@ function resolveSessionSecret(explicit: string | undefined, uiPassword: string |
   }
   if (!uiPassword) return null;
   return createHash("sha256").update(`scyth3d-session-v1\0${uiPassword}`).digest("base64url");
+}
+
+function sameSecret(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function optionalSecret(value: string | undefined, name: string): string | null {
+  const trimmed = value?.trim() || "";
+  if (!trimmed) return null;
+  if (trimmed.length < MIN_API_KEY_LENGTH) {
+    throw new Error(`${name} must be at least ${MIN_API_KEY_LENGTH} characters.`);
+  }
+  return trimmed;
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {

@@ -35,6 +35,14 @@ code, .mono { font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
   padding: 14px 18px; border-bottom: 1px solid var(--line);
 }
 .top nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.worker {
+  margin: 0; max-width: 280px;
+  font-family: "Chakra Petch", "Arial Narrow", Arial, Helvetica, sans-serif;
+  font-weight: 600; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--muted);
+}
+.worker.online { color: var(--text); }
+.worker.offline { color: var(--magenta); }
 .brand { display: flex; align-items: center; min-width: 0; padding: 4px 8px; text-decoration: none; color: inherit; }
 .brand img { width: 168px; height: auto; display: block; }
 .visually-hidden {

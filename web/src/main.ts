@@ -82,6 +82,7 @@ app.innerHTML = `
         <img src="/brand/logos/blackcat-makerlab-dark-bright_transparent@2x.png" width="168" height="92" alt="BlackCat MakerLab">
         <h1 class="visually-hidden">BlackCat MakerLab Slicer</h1>
       </a>
+      <p id="worker-status" class="worker">Checking the shop worker…</p>
       <nav class="tools">
         <button class="ghost" type="button" id="show-single">One model</button>
         <button class="ghost" type="button" id="show-fleet">Prepare plates</button>
@@ -229,6 +230,28 @@ must<HTMLFormElement>("#panel").addEventListener("submit", (event) => {
 });
 
 void boot();
+void pollWorker();
+
+async function pollWorker(): Promise<void> {
+  const status = document.querySelector("#worker-status");
+  if (!status) return;
+  try {
+    const response = await fetch("/v1/workers", { credentials: "same-origin" });
+    if (response.ok) {
+      const body = (await response.json()) as { mode: string; online: boolean };
+      status.className = body.online ? "worker online" : "worker offline";
+      status.textContent =
+        body.mode === "all-in-one"
+          ? "Slicing on this server"
+          : body.online
+            ? "Worker online"
+            : "No shop worker is online. Jobs wait until a worker connects.";
+    }
+  } catch {
+    status.textContent = "Worker status is unavailable.";
+  }
+  window.setTimeout(() => void pollWorker(), 4000);
+}
 
 const fleetPanel = must<HTMLElement>("#fleet");
 const singlePanel = must<HTMLFormElement>("#panel");

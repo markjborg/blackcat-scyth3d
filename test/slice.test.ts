@@ -40,7 +40,7 @@ describe("OrcaSlicer", () => {
         dimensions: pla.result.dimensionsMm,
         quote: pla.quote,
       })}`);
-      assert.equal(pla.status, "succeeded");
+      assert.equal(pla.status, "done");
       assert.ok(pla.result.filamentGrams >= 3.5 && pla.result.filamentGrams <= 3.85, `grams ${pla.result.filamentGrams}`);
       assert.equal(pla.result.layerCount, 100);
       assert.ok(pla.result.printTimeSeconds >= 1000 && pla.result.printTimeSeconds <= 1500, `time ${pla.result.printTimeSeconds}`);
@@ -61,7 +61,7 @@ describe("OrcaSlicer", () => {
         layers: petg.result.layerCount,
         quote: petg.quote,
       })}`);
-      assert.equal(petg.status, "succeeded", petg.error?.message);
+      assert.equal(petg.status, "done", petg.error?.message);
       assert.ok(petg.result.filamentGrams >= 3.2 && petg.result.filamentGrams <= 3.9, `petg grams ${petg.result.filamentGrams}`);
       assert.equal(petg.result.layerCount, 100);
       assert.ok(petg.result.printTimeSeconds >= 1400 && petg.result.printTimeSeconds <= 2200, `petg time ${petg.result.printTimeSeconds}`);

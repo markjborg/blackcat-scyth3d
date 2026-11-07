@@ -3,11 +3,13 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "./errors.js";
 import { parseModel } from "./mesh/parse.js";
+import { claimJob, extendLease, releaseLease } from "./jobs/lease.js";
+import { WorkerRegistry } from "./jobs/registry.js";
 import { quoteLines, RESIN_DENSITY_G_PER_ML, type Quote, type QuoteLineInput } from "./pricing.js";
 import { findPrinter, resolveFdm, type Printer, type ResolvedFdm } from "./profiles/catalog.js";
 import { TaskQueue } from "./queue.js";
 import type { Config } from "./config.js";
-import { Store, type JobRecord, type ModelRecord } from "./store.js";
+import { Store, type JobRecord, type JobResult, type ModelRecord } from "./store.js";
 import type { SliceRequest, SlicerEngine } from "./slicer/orca.js";
 import { sliceFleetPlates, zipJobOutput } from "./slicer/plates.js";
 import { sliceSl1s } from "./slicer/resin.js";
@@ -23,6 +25,9 @@ export interface SliceInput {
 
 export class ScythService {
   private readonly queue: TaskQueue;
+  readonly workers = new WorkerRegistry();
+  private readonly claimLock = new Mutex();
+  private queueWaiters: Array<() => void> = [];
 
   constructor(
     readonly config: Config,
@@ -84,6 +89,7 @@ export class ScythService {
       },
     };
     await this.store.saveJob(job);
+    if (!this.config.allInOne) return this.enqueue(job, wait);
     const task = this.queue.run(() => this.executeSlice(job.id, model, selection, input));
     if (!wait) {
       task.catch((error: unknown) => {
@@ -114,7 +120,7 @@ export class ScythService {
     const job: JobRecord = {
       id: randomUUID(),
       type: "resin",
-      status: "succeeded",
+      status: "done",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       modelId: model.id,
@@ -196,9 +202,10 @@ export class ScythService {
       },
     };
     await this.store.saveJob(job);
+    if (!this.config.allInOne) return this.enqueue(job, wait);
     const task = this.queue.run(async () => {
       const current = await this.store.readJob(job.id);
-      current.status = "running";
+      current.status = "slicing";
       current.updatedAt = new Date().toISOString();
       await this.store.saveJob(current);
       try {
@@ -234,7 +241,7 @@ export class ScythService {
             await copyFile(path.join(outputDir, sliced.projectName), path.join(outputDir, "plate_1.gcode.3mf"));
           }
           await writeFile(path.join(outputDir, "archive.zip"), await zipJobOutput(outputDir));
-          current.status = "succeeded";
+          current.status = "done";
           current.result = {
             filamentGrams: sliced.filamentGrams,
             grams: sliced.filamentGrams,
@@ -274,7 +281,7 @@ export class ScythService {
           const grams = round3(sliced.resinMl * density);
           const outputDir = path.join(this.store.jobDir(job.id), "output");
           await writeFile(path.join(outputDir, "archive.zip"), await zipJobOutput(outputDir));
-          current.status = "succeeded";
+          current.status = "done";
           current.result = {
             volumeMl: sliced.resinMl,
             grams,
@@ -326,6 +333,168 @@ export class ScythService {
     return task;
   }
 
+  workerStatus(): { mode: "all-in-one" | "queue"; online: boolean; workers: Array<{ id: string; lastSeenAt: string }> } {
+    return {
+      mode: this.config.allInOne ? "all-in-one" : "queue",
+      online: this.config.allInOne || this.workers.online(this.config.workerOfflineMs),
+      workers: this.workers.list(this.config.workerOfflineMs),
+    };
+  }
+
+  heartbeat(workerId: string, jobId?: string): void {
+    this.workers.beat(workerId);
+    if (!jobId) return;
+    void this.touchLease(workerId, jobId, "slicing");
+  }
+
+  async claim(workerId: string, waitMs: number): Promise<JobRecord | null> {
+    this.workers.beat(workerId);
+    const deadline = Date.now() + Math.max(0, Math.min(waitMs, 25_000));
+    for (;;) {
+      const claimed = await this.claimLock.run(() => this.tryClaim(workerId));
+      if (claimed) return claimed;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return null;
+      await this.waitForWork(Math.min(remaining, 1000));
+    }
+  }
+
+  async markSlicing(workerId: string, jobId: string): Promise<JobRecord> {
+    this.workers.beat(workerId);
+    const updated = await this.touchLease(workerId, jobId, "slicing");
+    if (!updated) throw new ApiError(409, "lease_lost", "This job is no longer claimed by that worker.");
+    return updated;
+  }
+
+  async completeJob(workerId: string, jobId: string, manifest: JobResult, files: Array<{ name: string; data: Buffer }>): Promise<JobRecord> {
+    this.workers.beat(workerId);
+    const job = await this.ownedJob(workerId, jobId);
+    const outputDir = path.join(this.store.jobDir(job.id), "output");
+    await mkdir(outputDir, { recursive: true });
+    for (const file of files) {
+      const name = path.basename(file.name);
+      if (!name || name !== file.name.replace(/\\/g, "/").split("/").pop()) {
+        throw new ApiError(400, "bad_filename", "Result files need a plain filename.");
+      }
+      await writeFile(path.join(outputDir, name), file.data);
+      if (name === "plate_1.gcode") await writeFile(this.store.gcodeFile(job.id), file.data);
+      if (name === "print.3mf" || name === "project.gcode.3mf") await writeFile(this.store.threeMfFile(job.id), file.data);
+    }
+    const density = RESIN_DENSITY_G_PER_ML[job.request.materialId as "standard-resin"];
+    const grams =
+      manifest.filamentGrams ??
+      (manifest.volumeMl && density ? round3(manifest.volumeMl * density) : manifest.grams);
+    job.status = "done";
+    job.claim = undefined;
+    job.result = manifest;
+    job.error = undefined;
+    job.outputs = {
+      gcode: files.some((file) => file.name.endsWith(".gcode")),
+      threeMf: files.some((file) => file.name.endsWith(".3mf")),
+      archive: files.some((file) => file.name.endsWith(".zip") || file.name.endsWith(".sl1") || file.name.endsWith(".sl1s")),
+    };
+    if (grams && grams > 0) {
+      job.quote = quoteLines([{ materialId: job.request.materialId, grams, note: "sliced by the shop worker" }]);
+    }
+    job.updatedAt = new Date().toISOString();
+    await this.store.saveJob(job);
+    return job;
+  }
+
+  async failJob(workerId: string, jobId: string, message: string): Promise<JobRecord> {
+    const job = await this.ownedJob(workerId, jobId);
+    job.status = "failed";
+    job.claim = undefined;
+    job.error = { code: "slice_failed", message: message.slice(0, 500) };
+    job.updatedAt = new Date().toISOString();
+    await this.store.saveJob(job);
+    return job;
+  }
+
+  async reapLeases(now = Date.now()): Promise<number> {
+    return this.claimLock.run(async () => {
+      let changed = 0;
+      for (const job of await this.store.listJobs()) {
+        const next = releaseLease(job, now);
+        if (next === job || (next.status === job.status && next.claim === job.claim)) continue;
+        await this.store.saveJob(next);
+        changed += 1;
+      }
+      if (changed > 0) this.poke();
+      return changed;
+    });
+  }
+
+  private async enqueue(job: JobRecord, wait: boolean): Promise<JobRecord> {
+    this.poke();
+    if (!wait) return job;
+    return this.waitUntilSettled(job.id);
+  }
+
+  private async waitUntilSettled(jobId: string): Promise<JobRecord> {
+    const deadline = Date.now() + (this.workers.online(this.config.workerOfflineMs) ? this.config.sliceTimeoutMs : this.config.queueWaitMs);
+    for (;;) {
+      const job = await this.store.readJob(jobId);
+      if (job.status === "done" || job.status === "succeeded" || job.status === "failed") return job;
+      if (Date.now() >= deadline) return job;
+      await this.waitForWork(300);
+    }
+  }
+
+  private async tryClaim(workerId: string): Promise<JobRecord | null> {
+    const now = Date.now();
+    const jobs = await this.store.listJobs();
+    for (const job of jobs) {
+      const released = releaseLease(job, now);
+      if (released !== job) await this.store.saveJob(released);
+    }
+    const waiting = (await this.store.listJobs())
+      .filter((job) => job.status === "queued" && (job.type === "fdm" || job.type === "plates"))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const next = waiting[0];
+    if (!next) return null;
+    const claimed = claimJob(next, workerId, now, this.config.leaseMs);
+    await this.store.saveJob(claimed);
+    return claimed;
+  }
+
+  private async touchLease(workerId: string, jobId: string, status: "claimed" | "slicing"): Promise<JobRecord | null> {
+    return this.claimLock.run(async () => {
+      const job = await this.store.readJob(jobId);
+      const next = extendLease(job, workerId, Date.now(), this.config.leaseMs, status);
+      if (!next) return null;
+      await this.store.saveJob(next);
+      return next;
+    });
+  }
+
+  private async ownedJob(workerId: string, jobId: string): Promise<JobRecord> {
+    const job = await this.store.readJob(jobId);
+    if (job.claim?.workerId !== workerId || (job.status !== "claimed" && job.status !== "slicing")) {
+      throw new ApiError(409, "lease_lost", "This job is no longer claimed by that worker.");
+    }
+    return job;
+  }
+
+  private poke(): void {
+    const waiters = this.queueWaiters;
+    this.queueWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  private waitForWork(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const wake = () => {
+        clearTimeout(timer);
+        this.queueWaiters = this.queueWaiters.filter((item) => item !== wake);
+        resolve();
+      };
+      timer = setTimeout(wake, ms);
+      this.queueWaiters.push(wake);
+    });
+  }
+
   private async expandModels(models: Array<{ modelId: string; quantity: number }>): Promise<Array<{ model: ModelRecord; quantity: number }>> {
     let total = 0;
     const expanded: Array<{ model: ModelRecord; quantity: number }> = [];
@@ -342,7 +511,7 @@ export class ScythService {
 
   private async executeSlice(jobId: string, model: ModelRecord, selection: ResolvedFdm, input: SliceInput): Promise<JobRecord> {
     const job = await this.store.readJob(jobId);
-    job.status = "running";
+    job.status = "slicing";
     job.updatedAt = new Date().toISOString();
     await this.store.saveJob(job);
     try {
@@ -356,7 +525,7 @@ export class ScythService {
         timeoutMs: this.config.sliceTimeoutMs,
       };
       const sliced = await this.slicer.slice(request);
-      job.status = "succeeded";
+      job.status = "done";
       job.result = {
         filamentGrams: sliced.filamentGrams,
         filamentVolumeCm3: sliced.filamentVolumeCm3,
@@ -387,6 +556,19 @@ export class ScythService {
     job.updatedAt = new Date().toISOString();
     await this.store.saveJob(job);
     return job;
+  }
+}
+
+export class Mutex {
+  private tail: Promise<void> = Promise.resolve();
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(fn, fn);
+    this.tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 }
 

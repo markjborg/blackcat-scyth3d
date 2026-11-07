@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
-import { requireApiKey, requireApiKeyOrSession } from "../auth.js";
+import { requireApiKey, requireApiKeyOrSession, requireWorker } from "../auth.js";
+import { isDone } from "../jobs/lease.js";
 import type { Config } from "../config.js";
 import { ApiError, errorBody } from "../errors.js";
 import { registerTools } from "../mcp.js";
@@ -23,10 +24,10 @@ import {
   noteLoginFailure,
   passwordsMatch,
 } from "../session.js";
-import { assertId, type JobRecord, type ModelRecord } from "../store.js";
+import { assertId, type JobRecord, type JobResult, type ModelRecord } from "../store.js";
 import { renderLoginPage, renderUiMissingPage } from "./loginPage.js";
 import { renderQuotePdf } from "../quotePdf.js";
-import { readSingleUpload } from "./upload.js";
+import { readResultUpload, readSingleUpload } from "./upload.js";
 
 export interface AppBundle {
   app: express.Express;
@@ -50,6 +51,7 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   app.use(express.json({ limit: jsonLimit }));
   app.use(express.urlencoded({ extended: false, limit: "32kb" }));
   mountLogin(app, config);
+  mountWorker(app, config, service);
   const brandRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../brand");
   app.use("/brand", express.static(brandRoot, { fallthrough: false, maxAge: "1h" }));
   app.get("/favicon.ico", (_req, res) => {
@@ -57,6 +59,9 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   });
   app.use(requireApiKeyOrSession(config));
 
+  app.get("/v1/workers", (_req, res) => {
+    res.json(service.workerStatus());
+  });
   app.get("/v1/printers", (_req, res) => {
     res.json({ printers: publicCatalog().printers });
   });
@@ -110,7 +115,7 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   }));
   app.get("/v1/jobs/:id/quote.pdf", wrap(async (req, res) => {
     const job = await service.getJob(routeId(req.params.id));
-    if (job.status !== "succeeded" || !job.quote) {
+    if (!isDone(job.status) || !job.quote) {
       throw new ApiError(409, "not_ready", "The quote PDF is available after the job succeeds.");
     }
     const pdf = renderQuotePdf(job.quote, { jobId: job.id });
@@ -147,7 +152,7 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   }));
   app.get("/v1/jobs/:id/archive", wrap(async (req, res) => {
     const job = await service.getJob(routeId(req.params.id));
-    if (job.status !== "succeeded" || !job.outputs?.archive) {
+    if (!isDone(job.status) || !job.outputs?.archive) {
       throw new ApiError(409, "not_ready", "The plate archive is available after preparation succeeds.");
     }
     res.download(path.join(service.store.jobDir(job.id), "output", "archive.zip"), "plates.zip");
@@ -286,9 +291,73 @@ function mountLogin(app: express.Express, config: Config): void {
   });
 }
 
+function mountWorker(app: express.Express, config: Config, service: ScythService): void {
+  const guard = requireWorker(config);
+  app.post("/v1/worker/heartbeat", guard, wrap(async (req, res) => {
+    const body = objectBody(req.body);
+    service.heartbeat(requiredString(body.workerId, "workerId"), optionalString(body.jobId));
+    res.json({ ok: true });
+  }));
+  app.post("/v1/worker/claim", guard, wrap(async (req, res) => {
+    const body = objectBody(req.body);
+    const waitMs = body.waitMs === undefined ? 0 : requiredNumber(body.waitMs, "waitMs");
+    const job = await service.claim(requiredString(body.workerId, "workerId"), waitMs);
+    if (!job) {
+      res.status(204).end();
+      return;
+    }
+    const models = await modelsFor(service, job);
+    res.json({ job: presentJob(job), models });
+  }));
+  app.get("/v1/worker/jobs/:id/models/:modelId", guard, wrap(async (req, res) => {
+    const job = await service.getJob(routeId(req.params.id));
+    const workerId = headerValue(req.headers["x-worker-id"]);
+    if (!workerId || job.claim?.workerId !== workerId) {
+      throw new ApiError(409, "lease_lost", "This job is no longer claimed by that worker.");
+    }
+    const model = await service.getModel(routeId(req.params.modelId));
+    const allowed = new Set([job.modelId, ...(job.request.models ?? []).map((item) => item.modelId)]);
+    if (!allowed.has(model.id)) throw new ApiError(404, "model_not_found", "That model is not part of this job.");
+    res.download(service.store.modelFile(model), model.filename);
+  }));
+  app.post("/v1/worker/jobs/:id/slicing", guard, wrap(async (req, res) => {
+    const body = objectBody(req.body);
+    const job = await service.markSlicing(requiredString(body.workerId, "workerId"), routeId(req.params.id));
+    res.json(presentJob(job));
+  }));
+  app.post("/v1/worker/jobs/:id/fail", guard, wrap(async (req, res) => {
+    const body = objectBody(req.body);
+    const job = await service.failJob(requiredString(body.workerId, "workerId"), routeId(req.params.id), requiredString(body.message, "message"));
+    res.json(presentJob(job));
+  }));
+  app.post("/v1/worker/jobs/:id/result", guard, wrap(async (req, res) => {
+    const workerId = headerValue(req.headers["x-worker-id"]);
+    if (!workerId) throw new ApiError(400, "missing_worker", "Send the X-Worker-Id header.");
+    const uploaded = await readResultUpload(req, config.maxUploadBytes);
+    const manifest = uploaded.manifest;
+    if (!manifest || typeof manifest !== "object") throw new ApiError(400, "missing_manifest", "The result needs a manifest.");
+    const job = await service.completeJob(workerId, routeId(req.params.id), manifest as JobResult, uploaded.files);
+    res.json(presentJob(job));
+  }));
+}
+
+async function modelsFor(service: ScythService, job: JobRecord): Promise<Array<{ id: string; filename: string }>> {
+  const ids = job.request.models?.length ? [...new Set(job.request.models.map((item) => item.modelId))] : [job.modelId];
+  const models = [];
+  for (const id of ids) {
+    const model = await service.getModel(id);
+    models.push({ id: model.id, filename: model.filename });
+  }
+  return models;
+}
+
+function headerValue(value: string | string[] | undefined): string {
+  return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
+}
+
 async function readyFdmJob(service: ScythService, id: string): Promise<JobRecord> {
   const job = await service.getJob(id);
-  if (job.type !== "fdm" || job.status !== "succeeded" || !job.outputs?.gcode) {
+  if (job.type !== "fdm" || !isDone(job.status) || !job.outputs?.gcode) {
     throw new ApiError(409, "not_ready", "G-code and 3MF are available after a successful FDM slice.");
   }
   return job;
@@ -333,7 +402,7 @@ function routeIdNumber(value: string | string[]): number {
 async function plateFile(service: ScythService, jobId: string, index: number, kind: "preview" | "gcode" | "printer"): Promise<string> {
   const job = await service.getJob(jobId);
   const plate = job.result?.plates?.find((item) => item.index === index);
-  if (!plate || job.status !== "succeeded") throw new ApiError(404, "plate_not_found", `Plate ${index} is not in this job.`);
+  if (!plate || !isDone(job.status)) throw new ApiError(404, "plate_not_found", `Plate ${index} is not in this job.`);
   const name = kind === "preview" ? plate.previewName : kind === "gcode" ? plate.gcodeName : plate.printerFile;
   if (!name || name.includes("/") || name.includes("\\")) throw new ApiError(404, "plate_not_found", `Plate ${index} has no ${kind} file.`);
   return path.join(service.store.jobDir(job.id), "output", name);
