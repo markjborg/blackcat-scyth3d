@@ -1,6 +1,6 @@
-# BlackCat Scyth3d
+# BlackCat MakerLab Slicer
 
-Self-hosted slicing and quoting for BlackCat MakerLab in Malta. One process serves the browser slicer, the REST API, and the Model Context Protocol server. They share the OrcaSlicer engine, the job store, and the pricing rules.
+Self-hosted slicing and quoting for BlackCat MakerLab in Malta. One process serves the browser, the REST API, and the Model Context Protocol server. They share the OrcaSlicer engine, the job store, and the pricing rules. The product name is BlackCat MakerLab Slicer. The npm package name stays `blackcat-scyth3d`, and the environment variables stay `SCYTH3D_*`.
 
 FDM jobs are sliced with [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer) 2.4.2, headless, using the Bambu Lab 0.4 mm presets that ship with it. Resin jobs are not sliced. The service measures the mesh and returns volume and grams.
 
@@ -26,6 +26,7 @@ Prices are Mark's approved rates, before VAT:
 - The order minimum is €10 before VAT.
 - VAT is 18% on top of that subtotal.
 - Shipping is excluded and added separately.
+- A finished job can download `BlackCat-MakerLab-quote.pdf`.
 
 Resin grams use a closed-mesh volume and these densities: Standard Resin 1.10 g/ml, High Quality Resin 1.15 g/ml. Hollows and drain holes count only when they are already in the mesh. FDM grams come from OrcaSlicer.
 
@@ -118,7 +119,7 @@ Omit `wait` to get `202` and poll `GET /v1/jobs/:id`. Optional slice fields are 
 
 ## MCP
 
-The MCP endpoint is streamable HTTP at `POST /mcp`, using `@modelcontextprotocol/server` and `@modelcontextprotocol/node`. Send `Authorization: Bearer <key>` and `Accept: application/json, text/event-stream`.
+The MCP server name is BlackCat MakerLab Slicer. The endpoint is streamable HTTP at `POST /mcp`, using `@modelcontextprotocol/server` and `@modelcontextprotocol/node`. Send `Authorization: Bearer <key>` and `Accept: application/json, text/event-stream`.
 
 Tools:
 
@@ -133,7 +134,7 @@ Cursor, or another client that speaks streamable HTTP, can use:
 ```json
 {
   "mcpServers": {
-    "blackcat-scyth3d": {
+    "BlackCat MakerLab": {
       "url": "http://127.0.0.1:8080/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_API_KEY"
@@ -147,7 +148,7 @@ Large models should be uploaded with `POST /v1/models` and then sliced by `model
 
 ## Why the profiles are flattened
 
-OrcaSlicer's CLI applies the JSON passed to `--load-settings` and `--load-filaments`, but it does not walk the `inherits` chain. Without that chain, filament density stays 0 and speeds fall back to slow defaults. Scyth3d flattens the Bambu preset chain (machine, process, filament) and writes the result into the job directory before slicing. G-code and a `.gcode.3mf` are both kept. Bambu printers take the 3MF; the G-code is there for inspection and for the gram, time, and layer counters in its footer.
+OrcaSlicer's CLI applies the JSON passed to `--load-settings` and `--load-filaments`, but it does not walk the `inherits` chain. Without that chain, filament density stays 0 and speeds fall back to slow defaults. The slicer flattens the Bambu preset chain (machine, process, filament) and writes the result into the job directory before slicing. G-code and a `.gcode.3mf` are both kept. Bambu printers take the 3MF; the G-code is there for inspection and for the gram, time, and layer counters in its footer.
 
 ## Develop and test
 

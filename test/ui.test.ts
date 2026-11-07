@@ -32,7 +32,10 @@ describe("browser session", () => {
     try {
       const loginPage = await fetch(`${app.baseUrl}/login`);
       assert.equal(loginPage.status, 200);
-      assert.equal((await loginPage.text()).includes(TEST_API_KEY), false);
+      const loginHtml = await loginPage.text();
+      assert.equal(loginHtml.includes(TEST_API_KEY), false);
+      assert.match(loginHtml, /BlackCat MakerLab/);
+      assert.equal(loginHtml.includes("Scyth3d"), false);
 
       const wrong = await fetch(`${app.baseUrl}/login`, {
         method: "POST",
@@ -58,7 +61,7 @@ describe("browser session", () => {
         redirect: "manual",
       });
       assert.equal(home.status, 200);
-      assert.match(await home.text(), /BlackCat Scyth3d/);
+      assert.match(await home.text(), /BlackCat MakerLab/);
 
       const anonymous = await fetch(`${app.baseUrl}/`, {
         headers: { accept: "text/html" },

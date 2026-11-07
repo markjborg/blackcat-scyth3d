@@ -69,21 +69,19 @@ interface Job {
   result?: JobResult;
   quote?: Quote;
   error?: { message: string };
-  downloads?: { gcode?: string; threeMf?: string; archive?: string };
+  downloads?: { gcode?: string; threeMf?: string; archive?: string; quotePdf?: string };
 }
 
+document.title = "BlackCat MakerLab Slicer";
 const app = document.querySelector("#app");
 if (!app) throw new Error("Missing #app");
 app.innerHTML = `
   <div class="app">
     <header class="top">
-      <div class="brand">
-        <svg viewBox="0 0 34 26" aria-hidden="true"><path fill="#e0a44a" d="M5 24 L10 3 L17 18 Z M29 24 L24 3 L17 18 Z"/></svg>
-        <div>
-          <h1>BlackCat Scyth3d</h1>
-          <p>MakerLab · Malta</p>
-        </div>
-      </div>
+      <a class="brand" href="/">
+        <img src="/brand/logos/blackcat-makerlab-dark-bright_transparent@2x.png" width="168" height="92" alt="BlackCat MakerLab">
+        <h1 class="visually-hidden">BlackCat MakerLab Slicer</h1>
+      </a>
       <nav class="tools">
         <button class="ghost" type="button" id="show-single">One model</button>
         <button class="ghost" type="button" id="show-fleet">Prepare plates</button>
@@ -143,6 +141,17 @@ app.innerHTML = `
         <div id="fleet-result"></div>
       </section>
     </main>
+    <footer class="site-footer">
+      <img class="mark" src="/brand/logos/blackcat-logo-reverse_transparent@2x.png" width="160" alt="BlackCat">
+      <div>MakerLab — 3D printing &amp; fabrication · a BlackCat lab</div>
+      <div>blackcat.eu.com · labs@blackcat.eu.com · +356 9921 4462</div>
+      <div>BlackCat Studios 71, First Floor, Triq l-Imdina, QRM9019, Malta</div>
+      <div>VAT MT31422627</div>
+      <div class="social">
+        <a href="https://instagram.com/blackcat.makerlab"><img src="/brand/icons/instagram-pink@2x.png" width="24" height="24" alt="Instagram"></a>
+        <a href="https://facebook.com/blackcat.makerlab"><img src="/brand/icons/facebook-pink@2x.png" width="24" height="24" alt="Facebook"></a>
+      </div>
+    </footer>
   </div>
   <input id="file" type="file" accept=".stl,.obj,.3mf,model/stl" hidden>
 `;
@@ -383,6 +392,7 @@ function renderFleetJob(job: Job): void {
   }
   const archive = job.downloads?.archive;
   if (archive) fleetResult.append(link(archive, "Download all plates"));
+  if (job.downloads?.quotePdf) fleetResult.append(link(job.downloads.quotePdf, "Quote PDF"));
   for (const warning of job.result?.warnings ?? []) {
     const note = document.createElement("p");
     note.className = "muted";
@@ -592,6 +602,7 @@ function renderJob(job: Job): void {
   if (job.downloads?.gcode && job.downloads.threeMf) {
     downloads.append(link(job.downloads.gcode, "Download G-code"), link(job.downloads.threeMf, "Download 3MF"));
   }
+  if (job.downloads?.quotePdf) downloads.append(link(job.downloads.quotePdf, "Quote PDF"));
   if (result?.warnings?.length) {
     const note = document.createElement("p");
     note.className = "muted";

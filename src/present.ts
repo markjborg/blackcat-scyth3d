@@ -1,7 +1,7 @@
 import type { JobRecord } from "./store.js";
 
 export function presentJob(job: JobRecord): JobRecord & {
-  downloads?: { gcode?: string; threeMf?: string; archive?: string };
+  downloads?: { gcode?: string; threeMf?: string; archive?: string; quotePdf?: string };
 } {
   const downloads =
     job.status === "succeeded"
@@ -10,6 +10,7 @@ export function presentJob(job: JobRecord): JobRecord & {
             ? { gcode: `/v1/jobs/${job.id}/gcode`, threeMf: `/v1/jobs/${job.id}/3mf` }
             : {}),
           ...(job.outputs?.archive ? { archive: `/v1/jobs/${job.id}/archive` } : {}),
+          ...(job.quote ? { quotePdf: `/v1/jobs/${job.id}/quote.pdf` } : {}),
         }
       : undefined;
   const plates = job.result?.plates?.map((plate) => ({

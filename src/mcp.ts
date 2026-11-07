@@ -17,7 +17,7 @@ export function registerTools(server: McpServer, service: ScythService): void {
     {
       title: "List printers, materials, and profiles",
       description:
-        "List BlackCat Scyth3d printers, materials, and FDM profiles. FDM prices are €0.20/g for PLA and PETG. Resin is estimated from mesh volume, not sliced: Standard Resin €0.35/g, High Quality Resin (ABS-like) €0.42/g. Prices are before VAT.",
+        "List BlackCat MakerLab printers, materials, and FDM profiles. FDM prices are €0.20/g for PLA and PETG. Resin is estimated from mesh volume, not sliced: Standard Resin €0.35/g, High Quality Resin (ABS-like) €0.42/g. Prices are before VAT.",
       inputSchema: z.object({
         printerId: z.string().optional().describe("Optional printer id, for example bambu-a1."),
       }),

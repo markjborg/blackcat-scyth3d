@@ -1,4 +1,4 @@
-# BlackCat Scyth3d. The runtime image downloads OrcaSlicer, which is AGPL-3.0.
+# BlackCat MakerLab Slicer. The runtime image downloads OrcaSlicer, which is AGPL-3.0.
 # Distributing this image means offering corresponding source for both this
 # service and OrcaSlicer to anyone who uses it over a network.
 
@@ -52,6 +52,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
 COPY profiles ./profiles
+COPY brand ./brand
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin scyth3d \
     && chown -R scyth3d:scyth3d /app /data /tmp/scyth3d-home

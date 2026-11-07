@@ -26,7 +26,7 @@ const timer = setInterval(() => {
 timer.unref();
 
 server.listen(config.port, config.host, () => {
-  console.log(`BlackCat Scyth3d ${config.version} listening on ${config.host}:${config.port}`);
+  console.log(`BlackCat MakerLab Slicer ${config.version} listening on ${config.host}:${config.port}`);
 });
 
 function shutdown(): void {

@@ -21,7 +21,7 @@ export class PrintViewer {
   private readonly bedGroup = new THREE.Group();
   private readonly model = new THREE.Mesh(
     new THREE.BufferGeometry(),
-    new THREE.MeshStandardMaterial({ color: "#d9d2c5", roughness: 0.62, metalness: 0.04 }),
+    new THREE.MeshStandardMaterial({ color: "#F5F2E9", roughness: 0.62, metalness: 0.04 }),
   );
   private readonly toolpath = new THREE.LineSegments(
     new THREE.BufferGeometry(),
@@ -40,8 +40,8 @@ export class PrintViewer {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
     this.controls.maxPolarAngle = Math.PI * 0.49;
-    this.scene.add(new THREE.HemisphereLight("#f4efe4", "#1a1c22", 1.4));
-    const key = new THREE.DirectionalLight("#fff6e8", 1.6);
+    this.scene.add(new THREE.HemisphereLight("#F5F2E9", "#0A0A0A", 1.35));
+    const key = new THREE.DirectionalLight("#F5F2E9", 1.45);
     key.position.set(80, -120, 220);
     this.scene.add(key);
     this.model.visible = false;
@@ -63,13 +63,13 @@ export class PrintViewer {
     this.bedGroup.clear();
     const plate = new THREE.Mesh(
       new THREE.BoxGeometry(bed.x, bed.y, 3),
-      new THREE.MeshStandardMaterial({ color: "#1a1d24", roughness: 0.9, metalness: 0.05 }),
+      new THREE.MeshStandardMaterial({ color: "#141414", roughness: 0.92, metalness: 0.04 }),
     );
     plate.position.set(bed.x / 2, bed.y / 2, -1.5);
     this.bedGroup.add(plate);
     const edge = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(bed.x, bed.y, bed.z)),
-      new THREE.LineBasicMaterial({ color: "#e0a44a", transparent: true, opacity: 0.55 }),
+      new THREE.LineBasicMaterial({ color: "#FDBB1B", transparent: true, opacity: 0.7 }),
     );
     edge.position.set(bed.x / 2, bed.y / 2, bed.z / 2);
     this.bedGroup.add(edge);
@@ -185,7 +185,7 @@ export class PrintViewer {
     const last = Math.min(through, layers.length - 1);
     for (let layer = 0; layer <= last; layer += 1) {
       const bright = layer === last;
-      const color = bright ? [0.94, 0.69, 0.32] : [0.32, 0.28, 0.22];
+      const color = bright ? [0.992, 0.733, 0.106] : [0.722, 0.706, 0.659];
       for (const segment of layers[layer] ?? []) {
         positions.push(segment.ax, segment.ay, segment.az, segment.bx, segment.by, segment.bz);
         colors.push(color[0] ?? 0, color[1] ?? 0, color[2] ?? 0, color[0] ?? 0, color[1] ?? 0, color[2] ?? 0);
@@ -278,7 +278,7 @@ function gridLines(width: number, height: number, step: number): THREE.LineSegme
   for (let y = 0; y <= height; y += step) positions.push(0, y, 0, width, y, 0);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: "#2c313c" }));
+  return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: "#2A2410" }));
 }
 
 function writeVec(view: DataView, offset: number, vector: THREE.Vector3): void {

@@ -2,7 +2,7 @@
   "name": "blackcat-scyth3d",
   "version": "1.0.0",
   "private": true,
-  "description": "Self-hosted 3D-print slicing and quoting service for BlackCat MakerLab",
+  "description": "BlackCat MakerLab Slicer. Self-hosted 3D-print slicing and quoting for the lab.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "engines": {

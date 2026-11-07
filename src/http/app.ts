@@ -25,6 +25,7 @@ import {
 } from "../session.js";
 import { assertId, type JobRecord, type ModelRecord } from "../store.js";
 import { renderLoginPage, renderUiMissingPage } from "./loginPage.js";
+import { renderQuotePdf } from "../quotePdf.js";
 import { readSingleUpload } from "./upload.js";
 
 export interface AppBundle {
@@ -49,6 +50,11 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   app.use(express.json({ limit: jsonLimit }));
   app.use(express.urlencoded({ extended: false, limit: "32kb" }));
   mountLogin(app, config);
+  const brandRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../brand");
+  app.use("/brand", express.static(brandRoot, { fallthrough: false, maxAge: "1h" }));
+  app.get("/favicon.ico", (_req, res) => {
+    res.sendFile(path.join(brandRoot, "favicon.ico"));
+  });
   app.use(requireApiKeyOrSession(config));
 
   app.get("/v1/printers", (_req, res) => {
@@ -101,6 +107,16 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   }));
   app.get("/v1/jobs/:id", wrap(async (req, res) => {
     res.json(presentJob(await service.getJob(routeId(req.params.id))));
+  }));
+  app.get("/v1/jobs/:id/quote.pdf", wrap(async (req, res) => {
+    const job = await service.getJob(routeId(req.params.id));
+    if (job.status !== "succeeded" || !job.quote) {
+      throw new ApiError(409, "not_ready", "The quote PDF is available after the job succeeds.");
+    }
+    const pdf = renderQuotePdf(job.quote, { jobId: job.id });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", 'attachment; filename="BlackCat-MakerLab-quote.pdf"');
+    res.send(pdf);
   }));
   app.get("/v1/jobs/:id/gcode", wrap(async (req, res) => {
     const job = await readyFdmJob(service, routeId(req.params.id));
@@ -176,7 +192,7 @@ export function createApp(config: Config, service: ScythService): AppBundle {
   }));
 
   const mcp = createMcpHandler(() => {
-    const server = new McpServer({ name: "blackcat-scyth3d", version: config.version });
+    const server = new McpServer({ name: "BlackCat MakerLab Slicer", version: config.version });
     registerTools(server, service);
     return server;
   }, { responseMode: "auto" });
