@@ -35,7 +35,10 @@ describe("browser session", () => {
       const loginHtml = await loginPage.text();
       assert.equal(loginHtml.includes(TEST_API_KEY), false);
       assert.match(loginHtml, /BlackCat MakerLab/);
+      assert.match(loginHtml, />Sign in</);
       assert.equal(loginHtml.includes("Scyth3d"), false);
+      assert.equal(loginHtml.includes("VAT"), false);
+      assert.equal(loginHtml.includes("instagram"), false);
 
       const wrong = await fetch(`${app.baseUrl}/login`, {
         method: "POST",
