@@ -1,0 +1,24 @@
+# The lab server. It queues jobs and does not slice.
+# The shop PC runs docker-compose.worker.yml and connects outbound.
+services:
+  scyth3d:
+    build:
+      context: .
+      target: server
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      SCYTH3D_API_KEY: ${SCYTH3D_API_KEY:?Set SCYTH3D_API_KEY in .env}
+      SCYTH3D_UI_PASSWORD: ${SCYTH3D_UI_PASSWORD:?Set SCYTH3D_UI_PASSWORD in .env}
+      SCYTH3D_WORKER_TOKEN: ${SCYTH3D_WORKER_TOKEN:?Set SCYTH3D_WORKER_TOKEN in .env}
+      SCYTH3D_ALL_IN_ONE: "0"
+      SCYTH3D_DATA_DIR: /data
+      PORT: "8080"
+    volumes:
+      - scyth3d-data:/data
+    restart: unless-stopped
+
+volumes:
+  scyth3d-data:

@@ -1,0 +1,62 @@
+{
+ "p1s": {
+  "machine": "Bambu Lab P1S 0.4 nozzle",
+  "process": "0.20mm Standard @BBL X1C",
+  "filaments": {
+   "PLA": "Generic PLA",
+   "PETG": "Generic PETG",
+   "ASA": "Generic ASA",
+   "ABS": "Generic ABS",
+   "TPU": "Generic TPU"
+  },
+  "official_profile": true
+ },
+ "x1c": {
+  "machine": "Bambu Lab X1 Carbon 0.4 nozzle",
+  "process": "0.20mm Standard @BBL X1C",
+  "filaments": {
+   "PLA": "Generic PLA",
+   "PETG": "Generic PETG",
+   "ASA": "Generic ASA",
+   "ABS": "Generic ABS",
+   "TPU": "Generic TPU"
+  },
+  "official_profile": true
+ },
+ "p2s": {
+  "machine": "Bambu Lab P2S 0.4 nozzle",
+  "process": "0.20mm Standard @BBL P2S",
+  "filaments": {
+   "PLA": "Generic PLA @BBL P2S",
+   "PETG": "Generic PETG @BBL P2S",
+   "ASA": "Generic ASA @BBL P2S",
+   "ABS": "Generic ABS @BBL P2S",
+   "TPU": "Generic TPU @BBL P2S"
+  },
+  "official_profile": true
+ },
+ "h2c": {
+  "machine": "Bambu Lab H2D 0.4 nozzle",
+  "process": "0.20mm Standard @BBL H2D",
+  "filaments": {
+   "PLA": "Generic PLA @BBL H2D",
+   "PETG": "Generic PETG @BBL H2D",
+   "ASA": "Generic ASA @BBL H2D",
+   "ABS": "Generic ABS @BBL H2D",
+   "TPU": "Generic TPU @BBL H2D"
+  },
+  "official_profile": false
+ },
+ "giga": {
+  "machine": "Elegoo OrangeStorm Giga 0.6 nozzle",
+  "process": "0.30mm Standard @Elegoo Giga 0.6 nozzle",
+  "filaments": {
+   "PLA": "Elegoo PLA @Elegoo Giga",
+   "PETG": "Elegoo PETG @Elegoo Giga",
+   "ASA": "Elegoo ASA @Elegoo Giga",
+   "ABS": "Elegoo ASA @Elegoo Giga",
+   "TPU": "Elegoo Rapid TPU 95A @Elegoo Giga"
+  },
+  "official_profile": true
+ }
+}

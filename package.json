@@ -1,0 +1,38 @@
+{
+  "name": "blackcat-scyth3d",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BlackCat MakerLab Slicer. Self-hosted 3D-print slicing and quoting for the lab.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc && vite build",
+    "start": "node dist/index.js",
+    "worker": "tsx src/worker.ts",
+    "start:worker": "node dist/worker.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
+    "test": "tsx --test --test-concurrency=1 test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "busboy": "^1.6.0",
+    "express": "^5.1.0",
+    "fflate": "^0.8.3",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/busboy": "^1.5.4",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.15.0",
+    "@types/three": "^0.187.0",
+    "three": "^0.187.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.6"
+  }
+}

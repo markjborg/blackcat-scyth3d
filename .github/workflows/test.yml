@@ -1,0 +1,41 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install OrcaSlicer runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl xvfb \
+            libegl1 libglu1-mesa libgstreamer-plugins-base1.0-0 \
+            libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
+            libmspack0 libopengl0 libwayland-server0 libgtk-3-0 \
+            libglib2.0-0
+      - name: Install OrcaSlicer 2.4.2
+        run: |
+          curl -fL -o /tmp/OrcaSlicer.AppImage \
+            https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Linux_AppImage_Ubuntu2404_V2.4.2.AppImage
+          echo "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd  /tmp/OrcaSlicer.AppImage" | sha256sum -c -
+          chmod +x /tmp/OrcaSlicer.AppImage
+          cd /opt && sudo /tmp/OrcaSlicer.AppImage --appimage-extract
+          sudo mv /opt/squashfs-root /opt/orcaslicer
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+        env:
+          SCYTH3D_API_KEY: test-key-123456
+          SCYTH3D_REQUIRE_SLICER: "1"
+          ORCA_SLICER_BIN: /opt/orcaslicer/bin/orca-slicer
+          ORCA_RESOURCES: /opt/orcaslicer/resources
+      - run: npm run typecheck
